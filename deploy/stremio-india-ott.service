@@ -1,0 +1,27 @@
+[Unit]
+Description=Stremio India OTT catalog addon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stremio-india-ott
+ExecStart=/usr/bin/node addon.js
+Restart=always
+RestartSec=10
+
+# One process only. The cache is in-memory, so a second instance would mean a
+# second set of upstream scrapes and a second copy of the ranking.
+Environment=NODE_ENV=production
+Environment=HOST=0.0.0.0
+Environment=PORT=7000
+
+StandardOutput=append:/home/ubuntu/stremio-india-ott/addon.log
+StandardError=append:/home/ubuntu/stremio-india-ott/addon.log
+
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

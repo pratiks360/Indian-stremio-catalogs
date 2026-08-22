@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+
+# scraped page dumps / probe artifacts
+zee_next.json
+*.html

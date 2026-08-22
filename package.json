@@ -1,0 +1,17 @@
+{
+  "name": "stremio-india-ott",
+  "version": "0.1.0",
+  "description": "Stremio catalog addon: trending titles from Indian OTT platforms",
+  "private": true,
+  "type": "commonjs",
+  "main": "addon.js",
+  "scripts": {
+    "start": "node addon.js",
+    "netflix": "node -e \"require('./sources/netflix').getTrending().then(r=>console.table(r))\"",
+    "tmdb": "node -e \"require('./tmdb').resolve({title:process.argv[1],type:process.argv[2]||'movie'}).then(console.log)\" --"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10"
+  }
+}
