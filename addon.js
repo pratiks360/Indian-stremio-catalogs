@@ -3,14 +3,22 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const config = require('./config');
 const cache = require('./cache');
-const { PLATFORMS, getCatalog, warmAll } = require('./catalog');
+const { PLATFORMS, getCatalog, getTrendingCatalog, warmAll } = require('./catalog');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
+// A standard Stremio catalog is scoped to one type by the request URL
+// (/catalog/movie/... or /catalog/series/...), so a real mixed row is not
+// possible under type 'movie' or 'series'. This custom type gets its own
+// Discover tab; each returned meta still carries its own real type
+// (movie/series), which is all Stremio needs downstream.
+const TRENDING_TYPE = 'iott_trending';
+
 /**
  * A Stremio catalog entry is single-type, so each platform contributes two
- * entries (movie + series) rather than one dual-type catalog.
- * Catalog id format: iott-<platform>-<type>
+ * typed entries (movie + series) plus one merged "Trending" entry under the
+ * custom type above.
+ * Catalog id format: iott-<platform>-<type>, trending row: iott-<platform>-trending
  */
 // Only advertise a catalog we can actually fill. A platform with no ranking
 // source would serve an empty row in Stremio, which looks broken; better to
@@ -31,6 +39,12 @@ for (const p of servable) {
       extra: [{ name: 'skip', isRequired: false }]
     });
   }
+  catalogs.push({
+    type: TRENDING_TYPE,
+    id: `iott-${p.id}-trending`,
+    name: `${p.name} — Trending`,
+    extra: [{ name: 'skip', isRequired: false }]
+  });
 }
 
 const manifest = {
@@ -47,7 +61,7 @@ const manifest = {
     'falls back to TMDB Discover, powered by JustWatch.',
   logo: 'https://raw.githubusercontent.com/Stremio/stremio-art/master/original/stremio_symbol.png',
   resources: ['catalog'],
-  types: ['movie', 'series'],
+  types: ['movie', 'series', TRENDING_TYPE],
   idPrefixes: ['tt'],
   catalogs,
   behaviorHints: { configurable: false, configurationRequired: false }
@@ -56,16 +70,23 @@ const manifest = {
 const builder = new addonBuilder(manifest);
 
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
-  const match = /^iott-(.+)-(movie|series)$/.exec(id);
-  if (!match) {
-    console.warn(`[catalog] unknown catalog id: ${id}`);
+  const trendingMatch = /^iott-(.+)-trending$/.exec(id);
+  const typedMatch = /^iott-(.+)-(movie|series)$/.exec(id);
+
+  let platformId, fetcher;
+  if (trendingMatch && type === TRENDING_TYPE) {
+    platformId = trendingMatch[1];
+    fetcher = () => getTrendingCatalog(platformId);
+  } else if (typedMatch && typedMatch[2] === type) {
+    platformId = typedMatch[1];
+    fetcher = () => getCatalog(platformId, type);
+  } else {
+    console.warn(`[catalog] unknown catalog id/type: ${id} / ${type}`);
     return { metas: [] };
   }
-  const [, platformId, catalogType] = match;
-  if (catalogType !== type) return { metas: [] };
 
   try {
-    const { metas, origin } = await getCatalog(platformId, type);
+    const { metas, origin } = await fetcher();
     const skip = Number(extra && extra.skip) || 0;
     const page = skip ? metas.slice(skip) : metas;
     console.log(`[catalog] ${id} -> ${page.length} metas (origin: ${origin}, skip: ${skip})`);

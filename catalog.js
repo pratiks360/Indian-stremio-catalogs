@@ -128,6 +128,37 @@ async function getCatalog(platformId, type) {
 }
 
 /**
+ * Movies and series merged into one row. Stremio scopes a normal catalog by
+ * type in the URL, so a mixed row needs a custom catalog type
+ * (`iott_trending`) — Stremio renders it as its own Discover tab, and each
+ * meta still carries its real type (movie/series), which is all Stremio
+ * needs for the info page and stream lookup downstream.
+ *
+ * Ordering: platform rank ascending. For a real weekly chart (Netflix, ZEE5)
+ * rank is a single sequence already, so this is a genuine combined order. For
+ * Discover-fallback platforms movie and series ranks come from two separate
+ * TMDB queries (popularity within each type), so a merged sort here
+ * interleaves them by that per-type position rather than a true cross-type
+ * ranking — the best ordering available without a shared popularity signal.
+ *
+ * @param {string} platformId
+ * @returns {Promise<{metas:Array, origin:string}>}
+ */
+async function getTrendingCatalog(platformId) {
+  const platform = PLATFORMS[platformId];
+  if (!platform) return { metas: [], origin: 'none' };
+
+  const payload = await cache.get(`catalog:${platformId}`, platform.ttl, () => build(platformId));
+
+  const metas = [...payload.items]
+    .sort((a, b) => a.rank - b.rank || (a.type === b.type ? 0 : a.type === 'movie' ? -1 : 1))
+    .slice(0, config.MAX_ITEMS)
+    .map(it => toMeta(it, platform, payload.origin));
+
+  return { metas, origin: payload.origin };
+}
+
+/**
  * IMDb id as the meta id — Cinemeta fills in the details and every installed
  * stream addon resolves against it.
  */
@@ -158,4 +189,4 @@ async function warmAll() {
   }
 }
 
-module.exports = { PLATFORMS, getCatalog, build, warmAll };
+module.exports = { PLATFORMS, getCatalog, getTrendingCatalog, build, warmAll };
