@@ -49,7 +49,7 @@ for (const p of servable) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.0',
+  version: '0.1.1',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
