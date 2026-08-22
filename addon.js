@@ -67,7 +67,7 @@ if (config.OPENROUTER_API_KEY) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.1',
+  version: '0.1.2',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
