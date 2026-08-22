@@ -107,15 +107,26 @@ function parseResponse(text) {
 
 async function runSearch(query) {
   const prompt = buildPrompt(query);
-  const responseText = await openrouter.generateText(prompt);
-  const items = parseResponse(responseText);
+
+  // openrouter/free picks a random free model per call. A bad draw (wrong
+  // format, or a reasoning model that ate its budget without answering) is
+  // not proof the query has no answer — a second draw is often clean, so
+  // reroll once before giving up.
+  let items = [];
+  let lastRaw = '';
+  for (let draw = 1; draw <= 2 && !items.length; draw++) {
+    lastRaw = await openrouter.generateText(prompt);
+    items = parseResponse(lastRaw);
+    if (!items.length && draw === 1) {
+      console.warn(`[search] draw 1 unparseable for "${query}", retrying with a fresh model draw`);
+    }
+  }
 
   if (!items.length) {
-    // Thrown, not returned: openrouter/free draws a random free model per
-    // request, and an off-format or empty reply from one draw is not proof
-    // the query has no answer — the very next call can succeed. Throwing
-    // keeps cache.js from caching this as a 6h-long "no results".
-    throw new Error(`AI returned no parseable results (raw: ${JSON.stringify(responseText.slice(0, 200))})`);
+    // Thrown, not returned: cache.js only caches a producer that resolves,
+    // so this keeps the failure from being remembered as a 6h-long "no
+    // results" for a query the AI can plainly answer on another draw.
+    throw new Error(`AI returned no parseable results after 2 draws (raw: ${JSON.stringify(lastRaw.slice(0, 200))})`);
   }
 
   // No providerId — this is a general search, not scoped to one platform.
