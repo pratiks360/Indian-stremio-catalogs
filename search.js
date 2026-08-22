@@ -111,13 +111,21 @@ async function runSearch(query) {
   const items = parseResponse(responseText);
 
   if (!items.length) {
-    console.warn(`[search] AI returned no parseable results for "${query}"`);
-    return [];
+    // Thrown, not returned: openrouter/free draws a random free model per
+    // request, and an off-format or empty reply from one draw is not proof
+    // the query has no answer — the very next call can succeed. Throwing
+    // keeps cache.js from caching this as a 6h-long "no results".
+    throw new Error(`AI returned no parseable results (raw: ${JSON.stringify(responseText.slice(0, 200))})`);
   }
 
   // No providerId — this is a general search, not scoped to one platform.
   const resolved = await tmdb.resolveMany(items);
   console.log(`[search] "${query}": ${items.length} AI candidates -> ${resolved.length} resolved`);
+
+  if (!resolved.length) {
+    throw new Error(`AI candidates found but none resolved to an imdb_id (${items.length} candidates)`);
+  }
+
   return resolved;
 }
 
