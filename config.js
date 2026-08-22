@@ -56,10 +56,12 @@ const config = {
   // OpenRouter is the only AI provider this addon talks to for search — see
   // lib/openrouter.js. Model list: https://openrouter.ai/models
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
-  // Defaults to a free-tier model (":free" suffix = zero cost on OpenRouter,
-  // rate-limited instead of billed). Swap for a paid model id if quality or
-  // rate limits become an issue.
-  OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'z-ai/glm-5.2:free',
+  // "openrouter/free" is not one model — it's OpenRouter's own router that
+  // randomly picks from whichever free models currently have spare capacity.
+  // Pinning to one free model (e.g. z-ai/glm-5.2:free) meant every request
+  // died with 429 the moment that specific model got busy; the router routes
+  // around exactly that.
+  OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'openrouter/free',
 
   // TMDB is a HYDRATION source only: name -> imdb_id, poster, language.
   // It must never invent the ranking. When a platform scraper fails we serve
