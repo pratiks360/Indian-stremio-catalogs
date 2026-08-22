@@ -4,6 +4,7 @@ const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const config = require('./config');
 const cache = require('./cache');
 const { PLATFORMS, getCatalog, getTrendingCatalog, warmAll } = require('./catalog');
+const search = require('./search');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -47,6 +48,23 @@ for (const p of servable) {
   });
 }
 
+// AI Search: free-text search across any movie/series, not scoped to the 5
+// tracked platforms. One entry per real type (Stremio's search box queries
+// both) sharing the same id — see search.js.
+if (config.OPENROUTER_API_KEY) {
+  for (const type of ['movie', 'series']) {
+    catalogs.push({
+      type,
+      id: 'iott-ai-search',
+      name: 'AI Search',
+      extra: [{ name: 'search', isRequired: true }],
+      isSearch: true
+    });
+  }
+} else {
+  console.warn('[manifest] AI Search catalog not advertised — OPENROUTER_API_KEY is not set');
+}
+
 const manifest = {
   id: ADDON_ID,
   version: '0.1.1',
@@ -64,12 +82,31 @@ const manifest = {
   types: ['movie', 'series', TRENDING_TYPE],
   idPrefixes: ['tt'],
   catalogs,
-  behaviorHints: { configurable: false, configurationRequired: false }
+  behaviorHints: {
+    configurable: false,
+    configurationRequired: false,
+    searchable: Boolean(config.OPENROUTER_API_KEY)
+  }
 };
 
 const builder = new addonBuilder(manifest);
 
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
+  if (id === 'iott-ai-search') {
+    const query = extra && extra.search;
+    if (!query) return { metas: [] };
+    try {
+      const { metas } = await search.search(query, type);
+      console.log(`[search] "${query}" (${type}) -> ${metas.length} metas`);
+      // Free-text results aren't on a refresh schedule — don't let Stremio
+      // cache a query's answer past this addon's own 6h search cache.
+      return { metas, cacheMaxAge: 0 };
+    } catch (err) {
+      console.error(`[search] "${query}" failed: ${err.message}`);
+      return { metas: [] };
+    }
+  }
+
   const trendingMatch = /^iott-(.+)-trending$/.exec(id);
   const typedMatch = /^iott-(.+)-(movie|series)$/.exec(id);
 

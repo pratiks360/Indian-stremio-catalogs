@@ -45,8 +45,21 @@ const config = {
     jiohotstar: 24 * 60 * 60 * 1000,
     sonyliv: 24 * 60 * 60 * 1000,
     // Title -> IMDb resolution barely changes. Hold it a long time.
-    tmdbResolve: 7 * 24 * 60 * 60 * 1000
+    tmdbResolve: 7 * 24 * 60 * 60 * 1000,
+    // AI search queries are unbounded (any text a user types), unlike the
+    // fixed platform lists, so a shorter TTL — long enough that a repeated
+    // or reopened search doesn't cost a fresh model call, short enough that
+    // stale phrasing doesn't linger.
+    aiSearch: 6 * 60 * 60 * 1000
   },
+
+  // OpenRouter is the only AI provider this addon talks to for search — see
+  // lib/openrouter.js. Model list: https://openrouter.ai/models
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+  // Defaults to a free-tier model (":free" suffix = zero cost on OpenRouter,
+  // rate-limited instead of billed). Swap for a paid model id if quality or
+  // rate limits become an issue.
+  OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'z-ai/glm-5.2:free',
 
   // TMDB is a HYDRATION source only: name -> imdb_id, poster, language.
   // It must never invent the ranking. When a platform scraper fails we serve
@@ -76,6 +89,9 @@ const config = {
 
 if (!config.TMDB_API_KEY) {
   console.warn('[config] TMDB_API_KEY missing. Copy .env.example to .env and fill it in.');
+}
+if (!config.OPENROUTER_API_KEY) {
+  console.warn('[config] OPENROUTER_API_KEY missing — AI search catalog will error until it is set.');
 }
 
 module.exports = config;
