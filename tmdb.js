@@ -281,6 +281,28 @@ async function resolveUncached(title, type, year, providerId, dubbed) {
 }
 
 /**
+ * Every provider id this title is streaming on in India (subscription, free,
+ * or ad-supported). One TMDB call covers every provider at once — cached so
+ * checking a title against all 5 tracked platforms costs one fetch, not 5.
+ */
+async function getWatchProviderIds(type, tmdbId) {
+  const key = `watchproviders:${type}:${tmdbId}`;
+  return cache.get(key, config.TTL.tmdbResolve, async () => {
+    const path = type === 'series' ? `/tv/${tmdbId}/watch/providers` : `/movie/${tmdbId}/watch/providers`;
+    try {
+      const data = await tmdbGet(path);
+      const india = (data.results || {})[REGION];
+      if (!india) return [];
+      const offers = [...(india.flatrate || []), ...(india.free || []), ...(india.ads || [])];
+      return [...new Set(offers.map(o => Number(o.provider_id)))];
+    } catch (err) {
+      console.warn(`[tmdb] watch/providers failed for ${type} ${tmdbId}: ${err.message}`);
+      return [];
+    }
+  });
+}
+
+/**
  * Is this TMDB title streaming on the given provider in India?
  *
  * This is the tiebreak that title+year alone cannot give us. Netflix's Top 10
@@ -288,17 +310,8 @@ async function resolveUncached(title, type, year, providerId, dubbed) {
  * but only one of them is actually on Netflix IN.
  */
 async function availableOn(type, tmdbId, providerId) {
-  const path = type === 'series' ? `/tv/${tmdbId}/watch/providers` : `/movie/${tmdbId}/watch/providers`;
-  try {
-    const data = await tmdbGet(path);
-    const india = (data.results || {})[REGION];
-    if (!india) return false;
-    const offers = [...(india.flatrate || []), ...(india.free || []), ...(india.ads || [])];
-    return offers.some(o => Number(o.provider_id) === Number(providerId));
-  } catch (err) {
-    console.warn(`[tmdb] watch/providers failed for ${type} ${tmdbId}: ${err.message}`);
-    return false;
-  }
+  const ids = await getWatchProviderIds(type, tmdbId);
+  return ids.includes(Number(providerId));
 }
 
 async function externalImdbId(type, tmdbId) {
@@ -451,5 +464,6 @@ module.exports = {
   stripSeason,
   normalize,
   isAllowedLanguage,
-  availableOn
+  availableOn,
+  getWatchProviderIds
 };

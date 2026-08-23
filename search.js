@@ -1,17 +1,20 @@
 'use strict';
 
 /**
- * Free-text AI search: any query -> a mixed movie+series result list, each
- * hydrated to an IMDb id the same way as every other catalog in this addon.
+ * Free-text AI search and recommendations, two catalogs sharing one pipeline.
  *
  * Pipeline, modeled on itcon-pty-au/stremio-ai-search:
  *   query -> OpenRouter (plain "type|name|year" lines, not JSON)
  *         -> parse
  *         -> tmdb.resolveMany (title/year/language scoring, imdb_id lookup)
  *
- * Deliberately unfiltered by platform availability (user's call) — this
- * searches the general catalog, not just the 5 tracked platforms. It still
- * respects the addon-wide language restriction (en/hi/mr) via the same
+ * search()    — general lookup, unfiltered by platform availability (user's
+ *               call). A hit might not be on any of the 5 tracked platforms.
+ * recommend() — same pipeline, then filtered to only titles actually on one
+ *               of the 5 tracked platforms (checked via
+ *               tmdb.getWatchProviderIds), tagged with which one(s).
+ *
+ * Both respect the addon-wide language restriction (en/hi/mr) via the same
  * tmdb.resolve() gate every other source goes through.
  */
 
@@ -19,6 +22,7 @@ const config = require('./config');
 const cache = require('./cache');
 const tmdb = require('./tmdb');
 const openrouter = require('./lib/openrouter');
+const { PLATFORMS } = require('./catalog');
 
 const NUM_RESULTS = 20;
 
@@ -140,6 +144,18 @@ async function runSearch(query) {
   return resolved;
 }
 
+function toMeta(item, prefix) {
+  return {
+    id: item.imdb_id,
+    type: item.type,
+    name: item.name,
+    poster: item.poster || undefined,
+    posterShape: 'poster',
+    description: [prefix, item.description].filter(Boolean).join('\n\n') || undefined,
+    releaseInfo: item.year ? String(item.year) : undefined
+  };
+}
+
 /**
  * @param {string} query
  * @param {'movie'|'series'} type
@@ -150,20 +166,59 @@ async function search(query, type) {
   if (!q) return { metas: [] };
 
   const results = await cache.get(`search:${q}`, config.TTL.aiSearch, () => runSearch(q));
+  const metas = results.filter(it => it.type === type).map(it => toMeta(it));
+  return { metas };
+}
 
+/**
+ * Same AI pipeline as search(), but only titles actually available on one of
+ * the 5 tracked platforms make it through. Where search() answers "what is
+ * this", recommend() answers "what can I actually watch on my platforms".
+ *
+ * Checked via tmdb.getWatchProviderIds — one cached TMDB call per title,
+ * matched locally against every platform's provider id.
+ */
+async function runRecommend(query) {
+  const resolved = await runSearch(query);
+
+  const tagged = await Promise.all(
+    resolved.map(async item => {
+      const ids = await tmdb.getWatchProviderIds(item.type, item.tmdb_id);
+      const platforms = Object.values(PLATFORMS)
+        .filter(p => ids.includes(Number(p.providerId)))
+        .map(p => p.name);
+      return { ...item, platforms };
+    })
+  );
+
+  const onPlatform = tagged.filter(it => it.platforms.length > 0);
+  console.log(`[recommend] "${query}": ${resolved.length} candidates -> ${onPlatform.length} on a tracked platform`);
+
+  if (!onPlatform.length) {
+    // Same reasoning as runSearch: don't let a filtered-to-nothing result
+    // freeze the cache for 6h when a re-ask might land on titles that ARE
+    // on one of the platforms.
+    throw new Error(`AI found ${resolved.length} candidates but none are on a tracked platform`);
+  }
+
+  return onPlatform;
+}
+
+/**
+ * @param {string} query
+ * @param {'movie'|'series'} type
+ * @returns {Promise<{metas: Array}>}
+ */
+async function recommend(query, type) {
+  const q = normalizeQuery(query);
+  if (!q) return { metas: [] };
+
+  const results = await cache.get(`recommend:${q}`, config.TTL.aiSearch, () => runRecommend(q));
   const metas = results
     .filter(it => it.type === type)
-    .map(it => ({
-      id: it.imdb_id,
-      type: it.type,
-      name: it.name,
-      poster: it.poster || undefined,
-      posterShape: 'poster',
-      description: it.description || undefined,
-      releaseInfo: it.year ? String(it.year) : undefined
-    }));
+    .map(it => toMeta(it, `Available on: ${it.platforms.join(', ')}`));
 
   return { metas };
 }
 
-module.exports = { search, buildPrompt, parseResponse, NUM_RESULTS };
+module.exports = { search, recommend, buildPrompt, parseResponse, NUM_RESULTS };

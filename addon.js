@@ -49,8 +49,12 @@ for (const p of servable) {
 }
 
 // AI Search: free-text search across any movie/series, not scoped to the 5
-// tracked platforms. One entry per real type (Stremio's search box queries
-// both) sharing the same id — see search.js.
+// tracked platforms. AI Recommend: same query pipeline, filtered to titles
+// actually on a tracked platform. Two catalogs, not a toggle on one, so
+// "look anything up" and "what can I actually watch" stay visibly distinct
+// in Stremio's catalog list rather than depending on query phrasing.
+// One entry per real type (Stremio's search box queries both) sharing the
+// same id — see search.js.
 if (config.OPENROUTER_API_KEY) {
   for (const type of ['movie', 'series']) {
     catalogs.push({
@@ -60,14 +64,21 @@ if (config.OPENROUTER_API_KEY) {
       extra: [{ name: 'search', isRequired: true }],
       isSearch: true
     });
+    catalogs.push({
+      type,
+      id: 'iott-ai-recommend',
+      name: 'AI Recommend (My Platforms)',
+      extra: [{ name: 'search', isRequired: true }],
+      isSearch: true
+    });
   }
 } else {
-  console.warn('[manifest] AI Search catalog not advertised — OPENROUTER_API_KEY is not set');
+  console.warn('[manifest] AI Search / AI Recommend not advertised — OPENROUTER_API_KEY is not set');
 }
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.2',
+  version: '0.1.3',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -92,17 +103,20 @@ const manifest = {
 const builder = new addonBuilder(manifest);
 
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
-  if (id === 'iott-ai-search') {
+  if (id === 'iott-ai-search' || id === 'iott-ai-recommend') {
     const query = extra && extra.search;
     if (!query) return { metas: [] };
+    const label = id === 'iott-ai-recommend' ? 'recommend' : 'search';
     try {
-      const { metas } = await search.search(query, type);
-      console.log(`[search] "${query}" (${type}) -> ${metas.length} metas`);
+      const { metas } = await (id === 'iott-ai-recommend'
+        ? search.recommend(query, type)
+        : search.search(query, type));
+      console.log(`[${label}] "${query}" (${type}) -> ${metas.length} metas`);
       // Free-text results aren't on a refresh schedule — don't let Stremio
       // cache a query's answer past this addon's own 6h search cache.
       return { metas, cacheMaxAge: 0 };
     } catch (err) {
-      console.error(`[search] "${query}" failed: ${err.message}`);
+      console.error(`[${label}] "${query}" failed: ${err.message}`);
       return { metas: [] };
     }
   }
