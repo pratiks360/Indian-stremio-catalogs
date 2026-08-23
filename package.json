@@ -10,8 +10,13 @@
     "netflix": "node -e \"require('./sources/netflix').getTrending().then(r=>console.table(r))\"",
     "tmdb": "node -e \"require('./tmdb').resolve({title:process.argv[1],type:process.argv[2]||'movie'}).then(console.log)\" --"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
-    "stremio-addon-sdk": "^1.6.10"
+    "playwright": "^1.62.1",
+    "playwright-core": "^1.62.1",
+    "stremio-addon-sdk": "^1.6.10",
+    "undici": "^8.10.0"
   }
 }
