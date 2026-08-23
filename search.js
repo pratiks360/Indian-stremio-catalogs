@@ -116,13 +116,14 @@ async function runSearch(query) {
   // format, or a reasoning model that ate its budget without answering) is
   // not proof the query has no answer — a second draw is often clean, so
   // reroll once before giving up.
+  const MAX_DRAWS = 3;
   let items = [];
   let lastRaw = '';
-  for (let draw = 1; draw <= 2 && !items.length; draw++) {
+  for (let draw = 1; draw <= MAX_DRAWS && !items.length; draw++) {
     lastRaw = await openrouter.generateText(prompt);
     items = parseResponse(lastRaw);
-    if (!items.length && draw === 1) {
-      console.warn(`[search] draw 1 unparseable for "${query}", retrying with a fresh model draw`);
+    if (!items.length && draw < MAX_DRAWS) {
+      console.warn(`[search] draw ${draw} unparseable for "${query}", retrying with a fresh model draw`);
     }
   }
 
@@ -130,7 +131,7 @@ async function runSearch(query) {
     // Thrown, not returned: cache.js only caches a producer that resolves,
     // so this keeps the failure from being remembered as a 6h-long "no
     // results" for a query the AI can plainly answer on another draw.
-    throw new Error(`AI returned no parseable results after 2 draws (raw: ${JSON.stringify(lastRaw.slice(0, 200))})`);
+    throw new Error(`AI returned no parseable results after ${MAX_DRAWS} draws (raw: ${JSON.stringify(lastRaw.slice(0, 200))})`);
   }
 
   // No providerId — this is a general search, not scoped to one platform.
