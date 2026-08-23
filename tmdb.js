@@ -455,6 +455,56 @@ async function discoverByProvider(providerId, type, limit = config.MAX_ITEMS) {
   return out;
 }
 
+/**
+ * Latest RELEASED titles in one language, streamable somewhere in India —
+ * a language-scoped chart, not tied to any one of the 5 tracked platforms.
+ * Used for the Marathi Latest Releases catalog. Data powered by JustWatch —
+ * attribution lives in the addon manifest description.
+ */
+async function discoverLatestByLanguage(language, type, limit = config.MAX_ITEMS) {
+  const endpoint = type === 'series' ? '/discover/tv' : '/discover/movie';
+  const dateField = type === 'series' ? 'first_air_date' : 'primary_release_date';
+  const today = new Date().toISOString().slice(0, 10);
+
+  const data = await tmdbGet(endpoint, {
+    with_original_language: language,
+    watch_region: REGION,
+    // Streamable somewhere in India — filters out titles that only exist on
+    // TMDB (theatrical-only, foreign-market-only) with no India availability.
+    with_watch_monetization_types: 'flatrate|free|ads|rent|buy',
+    [`${dateField}.lte`]: today,
+    sort_by: `${dateField}.desc`,
+    include_adult: 'false',
+    page: 1
+  });
+
+  const results = (data.results || [])
+    .filter(c => isAllowedLanguage(c.original_language))
+    .slice(0, limit);
+
+  // Rank is assigned AFTER the IMDb check — a dropped title closes the gap
+  // rather than leaving one, same as discoverByProvider.
+  const out = [];
+  for (const c of results) {
+    const imdb_id = await externalImdbId(type, c.id);
+    if (!imdb_id) continue;
+    const date = c.release_date || c.first_air_date || '';
+    out.push({
+      imdb_id,
+      tmdb_id: c.id,
+      type,
+      rank: out.length + 1,
+      name: c.title || c.name,
+      poster: c.poster_path ? TMDB_IMAGE_BASE + c.poster_path : null,
+      description: c.overview || '',
+      year: date ? Number(date.slice(0, 4)) : null,
+      language: c.original_language,
+      releaseDate: date
+    });
+  }
+  return out;
+}
+
 module.exports = {
   tmdbGet,
   resolve,
@@ -465,5 +515,6 @@ module.exports = {
   normalize,
   isAllowedLanguage,
   availableOn,
-  getWatchProviderIds
+  getWatchProviderIds,
+  discoverLatestByLanguage
 };

@@ -178,6 +178,68 @@ function toMeta(item, platform, origin) {
   };
 }
 
+/**
+ * Language-scoped "latest releases" catalog — not tied to any one of the 5
+ * tracked platforms. TMDB Discover, filtered to titles actually streamable
+ * somewhere in India (JustWatch-backed watch/monetization data), sorted by
+ * release date rather than popularity. Movies and series merged into one row
+ * under the same custom trending type used elsewhere in this addon.
+ */
+const LANGUAGE_CATALOGS = {
+  'marathi-latest': { id: 'marathi-latest', name: 'Marathi — Latest Releases', language: 'mr' }
+};
+
+async function buildLanguageCatalog(catalogId) {
+  const cfg = LANGUAGE_CATALOGS[catalogId];
+  if (!cfg) throw new Error(`unknown language catalog: ${catalogId}`);
+
+  const [movies, series] = await Promise.all([
+    tmdb.discoverLatestByLanguage(cfg.language, 'movie'),
+    tmdb.discoverLatestByLanguage(cfg.language, 'series')
+  ]);
+  return { items: [...movies, ...series], origin: 'discover', at: Date.now() };
+}
+
+/**
+ * @param {string} catalogId key into LANGUAGE_CATALOGS
+ * @returns {Promise<{metas:Array, origin:string}>}
+ */
+async function getLanguageCatalog(catalogId) {
+  const cfg = LANGUAGE_CATALOGS[catalogId];
+  if (!cfg) return { metas: [], origin: 'none' };
+
+  const payload = await cache.get(
+    `langcatalog:${catalogId}`,
+    config.TTL.zee5, // same 24h cadence as everything else
+    () => buildLanguageCatalog(catalogId)
+  );
+
+  // Sort by actual release date across the merged movie+series list — rank
+  // from discoverLatestByLanguage is per-type only, release date is the real
+  // cross-type ordering for a "latest" row.
+  const metas = [...payload.items]
+    .sort((a, b) => String(b.releaseDate || '').localeCompare(String(a.releaseDate || '')))
+    .slice(0, config.MAX_ITEMS)
+    .map(it => toLanguageMeta(it, cfg));
+
+  return { metas, origin: payload.origin };
+}
+
+function toLanguageMeta(item, cfg) {
+  const parts = [`New in ${cfg.name.split(' — ')[0]} (via JustWatch/TMDB)`];
+  if (item.description) parts.push('\n\n' + item.description);
+
+  return {
+    id: item.imdb_id,
+    type: item.type,
+    name: item.name,
+    poster: item.poster || undefined,
+    posterShape: 'poster',
+    description: parts.join(' ').trim(),
+    releaseInfo: item.year ? String(item.year) : undefined
+  };
+}
+
 /** Fetch every registered platform once at boot so first render is instant. */
 async function warmAll() {
   // Sequential, not parallel. Warming five platforms at once put ~150
@@ -187,6 +249,17 @@ async function warmAll() {
   for (const p of Object.values(PLATFORMS)) {
     await cache.warm(`catalog:${p.id}`, p.ttl, () => build(p.id));
   }
+  for (const id of Object.keys(LANGUAGE_CATALOGS)) {
+    await cache.warm(`langcatalog:${id}`, config.TTL.zee5, () => buildLanguageCatalog(id));
+  }
 }
 
-module.exports = { PLATFORMS, getCatalog, getTrendingCatalog, build, warmAll };
+module.exports = {
+  PLATFORMS,
+  LANGUAGE_CATALOGS,
+  getCatalog,
+  getTrendingCatalog,
+  getLanguageCatalog,
+  build,
+  warmAll
+};

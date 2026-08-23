@@ -3,7 +3,7 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const config = require('./config');
 const cache = require('./cache');
-const { PLATFORMS, getCatalog, getTrendingCatalog, warmAll } = require('./catalog');
+const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguageCatalog, warmAll } = require('./catalog');
 const search = require('./search');
 
 const ADDON_ID = 'community.india.ott.catalogs';
@@ -48,6 +48,17 @@ for (const p of servable) {
   });
 }
 
+// Language-scoped "latest releases" rows — not tied to any single platform.
+// Same merged movie+series treatment as the per-platform Trending rows.
+for (const cfg of Object.values(LANGUAGE_CATALOGS)) {
+  catalogs.push({
+    type: TRENDING_TYPE,
+    id: `iott-lang-${cfg.id}`,
+    name: cfg.name,
+    extra: [{ name: 'skip', isRequired: false }]
+  });
+}
+
 // AI Search: free-text search across any movie/series, not scoped to the 5
 // tracked platforms. AI Recommend: same query pipeline, filtered to titles
 // actually on a tracked platform. Two catalogs, not a toggle on one, so
@@ -78,7 +89,7 @@ if (config.OPENROUTER_API_KEY) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.3',
+  version: '0.1.4',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -121,11 +132,14 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
     }
   }
 
+  const langMatch = /^iott-lang-(.+)$/.exec(id);
   const trendingMatch = /^iott-(.+)-trending$/.exec(id);
   const typedMatch = /^iott-(.+)-(movie|series)$/.exec(id);
 
   let platformId, fetcher;
-  if (trendingMatch && type === TRENDING_TYPE) {
+  if (langMatch && type === TRENDING_TYPE) {
+    fetcher = () => getLanguageCatalog(langMatch[1]);
+  } else if (trendingMatch && type === TRENDING_TYPE) {
     platformId = trendingMatch[1];
     fetcher = () => getTrendingCatalog(platformId);
   } else if (typedMatch && typedMatch[2] === type) {
