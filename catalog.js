@@ -11,6 +11,7 @@
 const config = require('./config');
 const cache = require('./cache');
 const tmdb = require('./tmdb');
+const runlog = require('./runlog');
 
 const PLATFORMS = {
   netflix: {
@@ -88,7 +89,10 @@ async function build(platformId) {
   // 2a. happy path: hydrate the real ranking against TMDB
   if (ranking) {
     const items = await tmdb.resolveMany(ranking.slice(0, config.MAX_ITEMS * 2), platform.providerId);
-    if (items.length) return { items, origin: 'scrape', at: Date.now() };
+    if (items.length) {
+      runlog.record(`platform:${platformId}`, items);
+      return { items, origin: 'scrape', at: Date.now() };
+    }
     console.error(`[${platformId}] nothing resolved from ranking -> TMDB Discover fallback`);
   }
 
@@ -104,7 +108,9 @@ async function build(platformId) {
     tmdb.discoverByProvider(platform.providerId, 'movie'),
     tmdb.discoverByProvider(platform.providerId, 'series')
   ]);
-  return { items: [...movies, ...series], origin: 'discover', at: Date.now() };
+  const items = [...movies, ...series];
+  runlog.record(`platform:${platformId}`, items);
+  return { items, origin: 'discover', at: Date.now() };
 }
 
 /**
@@ -197,7 +203,9 @@ async function buildLanguageCatalog(catalogId) {
     tmdb.discoverLatestByLanguage(cfg.language, 'movie'),
     tmdb.discoverLatestByLanguage(cfg.language, 'series')
   ]);
-  return { items: [...movies, ...series], origin: 'discover', at: Date.now() };
+  const items = [...movies, ...series];
+  runlog.record(`lang:${catalogId}`, items);
+  return { items, origin: 'discover', at: Date.now() };
 }
 
 /**

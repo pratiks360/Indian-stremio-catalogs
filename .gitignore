@@ -1,6 +1,7 @@
 node_modules/
 .env
 *.log
+data/
 
 # scraped page dumps / probe artifacts
 zee_next.json

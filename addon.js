@@ -1,10 +1,12 @@
 'use strict';
 
-const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
+const { addonBuilder, getRouter } = require('stremio-addon-sdk');
+const express = require('express');
 const config = require('./config');
 const cache = require('./cache');
 const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguageCatalog, warmAll } = require('./catalog');
 const search = require('./search');
+const runlog = require('./runlog');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -89,7 +91,7 @@ if (config.OPENROUTER_API_KEY) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.4',
+  version: '0.1.5',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -168,8 +170,23 @@ async function main() {
   await warmAll();
   console.log('[boot] cache state:', JSON.stringify(cache.stats(), null, 2));
 
-  serveHTTP(builder.getInterface(), { port: config.PORT });
+  // Not stremio-addon-sdk's serveHTTP() — it builds its own express app with
+  // no hook to add routes. Mounting the SDK's router on our own app instead
+  // keeps the addon protocol untouched while adding /runlog.json below.
+  const app = express();
+  app.use(getRouter(builder.getInterface()));
+  app.get('/', (_, res) => res.redirect('/manifest.json'));
+
+  // Publishes only the delta (newly added titles) per catalog refresh, not
+  // a full re-dump — see runlog.js. ?limit=N caps entry count.
+  app.get('/runlog.json', (req, res) => {
+    const limit = Number(req.query.limit) || undefined;
+    res.json(runlog.getLog(limit));
+  });
+
+  app.listen(config.PORT);
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);
+  console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog.json`);
   console.log(`[boot] install in Stremio via: stremio://${config.HOST}:${config.PORT}/manifest.json`);
 }
 
