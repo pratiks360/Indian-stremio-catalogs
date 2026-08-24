@@ -7,6 +7,7 @@ const cache = require('./cache');
 const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguageCatalog, warmAll } = require('./catalog');
 const search = require('./search');
 const runlog = require('./runlog');
+const { renderRunLogPage } = require('./runlog_html');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -91,7 +92,7 @@ if (config.OPENROUTER_API_KEY) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.5',
+  version: '0.1.6',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -184,9 +185,15 @@ async function main() {
     res.json(runlog.getLog(limit));
   });
 
+  app.get('/runlog', (req, res) => {
+    const limit = Number(req.query.limit) || undefined;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderRunLogPage(runlog.getLog(limit)));
+  });
+
   app.listen(config.PORT);
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);
-  console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog.json`);
+  console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog (html) / /runlog.json`);
   console.log(`[boot] install in Stremio via: stremio://${config.HOST}:${config.PORT}/manifest.json`);
 }
 
