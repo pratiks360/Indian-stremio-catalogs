@@ -8,6 +8,8 @@ const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguag
 const search = require('./search');
 const runlog = require('./runlog');
 const { renderRunLogPage } = require('./runlog_html');
+const stream = require('./stream');
+const debridCatalog = require('./debrid_catalog');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -90,20 +92,44 @@ if (config.OPENROUTER_API_KEY) {
   console.warn('[manifest] AI Search / AI Recommend not advertised — OPENROUTER_API_KEY is not set');
 }
 
+// What is already sitting in Real-Debrid, ready to play instantly.
+if (config.REALDEBRID_TOKEN) {
+  for (const type of ['movie', 'series']) {
+    catalogs.push({
+      type,
+      id: 'iott-debrid-cached',
+      name: 'Prowlarr — Debrid Cached',
+      extra: [{ name: 'skip', isRequired: false }]
+    });
+  }
+} else {
+  console.warn('[manifest] Debrid Cached catalog not advertised — REALDEBRID_TOKEN is not set');
+}
+
+// Streams come from Prowlarr. Without it this stays a catalog-only addon,
+// exactly as before, and playback is left to whatever else is installed.
+const STREAMING = Boolean(config.PROWLARR_API_KEY);
+if (!STREAMING) {
+  console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
+}
+
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.9',
+  version: '0.2.0',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
     'limited to English, Hindi and Marathi content. ' +
-    'Catalog metadata only — no streams: each title is served as an IMDb id so Cinemeta ' +
-    'fills in the details and your installed stream addons handle playback. ' +
+    'Titles are served as IMDb ids, so Cinemeta fills in the details. ' +
     'Netflix rankings come from the official Netflix Top 10 (Tudum). ' +
     'Metadata from TMDB. When a platform ranking is unavailable, availability data ' +
-    'falls back to TMDB Discover, powered by JustWatch.',
+    'falls back to TMDB Discover, powered by JustWatch.' +
+    (STREAMING
+      ? ' Streams are sourced from your own Prowlarr indexers and played ' +
+        'peer-to-peer, or via Real-Debrid where the release allows it.'
+      : ''),
   logo: 'https://raw.githubusercontent.com/Stremio/stremio-art/master/original/stremio_symbol.png',
-  resources: ['catalog'],
+  resources: STREAMING ? ['catalog', 'stream'] : ['catalog'],
   types: ['movie', 'series', TRENDING_TYPE],
   idPrefixes: ['tt'],
   catalogs,
@@ -131,6 +157,17 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
       return { metas, cacheMaxAge: 0 };
     } catch (err) {
       console.error(`[${label}] "${query}" failed: ${err.message}`);
+      return { metas: [] };
+    }
+  }
+
+  if (id === 'iott-debrid-cached') {
+    try {
+      const { metas, origin } = await debridCatalog.getCatalog(type);
+      console.log(`[catalog] debrid-cached (${type}) -> ${metas.length} metas`);
+      return { metas, cacheMaxAge: 300, staleRevalidate: 600, origin };
+    } catch (err) {
+      console.error(`[catalog] debrid-cached failed: ${err.message}`);
       return { metas: [] };
     }
   }
@@ -166,6 +203,26 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
   }
 });
 
+// Public origin used to build RD resolve links. Stremio must be able to
+// reach these, so it cannot be the loopback address the server binds to.
+const PUBLIC_ORIGIN =
+  process.env.PUBLIC_ORIGIN ||
+  `http://${config.HOST === '0.0.0.0' ? '127.0.0.1' : config.HOST}:${config.PORT}`;
+
+if (STREAMING) {
+  builder.defineStreamHandler(async ({ type, id }) => {
+    try {
+      const { streams } = await stream.getStreams(type, id, PUBLIC_ORIGIN);
+      console.log(`[stream] ${type} ${id} -> ${streams.length} streams`);
+      // Seeder counts and RD state both move; do not let Stremio pin these.
+      return { streams, cacheMaxAge: 0 };
+    } catch (err) {
+      console.error(`[stream] ${type} ${id} failed: ${err.message}`);
+      return { streams: [] };
+    }
+  });
+}
+
 async function main() {
   console.log(`[boot] region=${config.REGION} platforms=${Object.keys(PLATFORMS).join(',')}`);
   await warmAll();
@@ -190,6 +247,25 @@ async function main() {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderRunLogPage(runlog.getLog(limit)));
   });
+
+  // Real-Debrid links can only be resolved at play time: the torrent may
+  // need to be added first, and RD's instantAvailability endpoint that used
+  // to answer this up front is gone (see lib/realdebrid.js).
+  if (config.REALDEBRID_TOKEN) {
+    app.get('/rd/resolve/:payload', async (req, res) => {
+      try {
+        const result = await stream.resolveDebridLink(req.params.payload);
+        if (result.url) return res.redirect(302, result.url);
+
+        // Still downloading. Stremio shows this as a failed stream, which is
+        // honest — it is not playable yet — while RD keeps working on it.
+        res.status(503).type('text/plain').send(result.message);
+      } catch (err) {
+        console.error(`[rd] resolve failed: ${err.message}`);
+        res.status(502).type('text/plain').send(`Real-Debrid error: ${err.message}`);
+      }
+    });
+  }
 
   app.listen(config.PORT);
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);

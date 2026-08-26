@@ -23,11 +23,19 @@ async function tmdbGet(path, params = {}) {
   }
 
   // Network-level failures ("fetch failed" / ECONNRESET) are common enough
-  // from a cloud host under concurrency that a single attempt loses titles.
+  // from this cloud host that a single attempt loses titles. They also come
+  // in bursts: a tight loop of identical requests measured 3 failures in 5,
+  // each of which had already exhausted three closely-spaced retries. The
+  // backoff therefore has to outlast a burst, not just a blip — and carries
+  // jitter so concurrent callers do not all retry on the same beat.
+  const ATTEMPTS = 5;
   let lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(url, { headers: { accept: 'application/json' } });
+      const res = await fetch(url, {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(15000)
+      });
 
       if (res.status === 429) {
         const retryAfter = Number(res.headers.get('retry-after') || 2);
@@ -40,7 +48,10 @@ async function tmdbGet(path, params = {}) {
       return await res.json();
     } catch (err) {
       lastErr = err.cause ? new Error(`${err.message}: ${err.cause.message}`) : err;
-      if (attempt < 3) await sleep(attempt * 800);
+      if (attempt < ATTEMPTS) {
+        const base = Math.min(600 * 2 ** (attempt - 1), 5000);
+        await sleep(base + Math.random() * 400);
+      }
     }
   }
   throw lastErr;
