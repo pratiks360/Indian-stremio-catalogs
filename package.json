@@ -1,6 +1,6 @@
 {
   "name": "stremio-india-ott",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Stremio catalog addon: trending titles from Indian OTT platforms",
   "private": true,
   "type": "commonjs",

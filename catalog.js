@@ -90,7 +90,12 @@ async function build(platformId) {
   if (ranking) {
     const items = await tmdb.resolveMany(ranking.slice(0, config.MAX_ITEMS * 2), platform.providerId);
     if (items.length) {
-      runlog.record(`platform:${platformId}`, items);
+      // Record separately by type: movies/series accumulate, trending is delta-only
+      const movies = items.filter(it => it.type === 'movie');
+      const series = items.filter(it => it.type === 'series');
+      if (movies.length) runlog.record(`platform:${platformId}-movie`, movies, false);
+      if (series.length) runlog.record(`platform:${platformId}-series`, series, false);
+      runlog.record(`platform:${platformId}-trending`, items, true);
       return { items, origin: 'scrape', at: Date.now() };
     }
     console.error(`[${platformId}] nothing resolved from ranking -> TMDB Discover fallback`);
@@ -109,7 +114,9 @@ async function build(platformId) {
     tmdb.discoverByProvider(platform.providerId, 'series')
   ]);
   const items = [...movies, ...series];
-  runlog.record(`platform:${platformId}`, items);
+  if (movies.length) runlog.record(`platform:${platformId}-movie`, movies, false);
+  if (series.length) runlog.record(`platform:${platformId}-series`, series, false);
+  runlog.record(`platform:${platformId}-trending`, items, true);
   return { items, origin: 'discover', at: Date.now() };
 }
 
@@ -204,7 +211,8 @@ async function buildLanguageCatalog(catalogId) {
     tmdb.discoverLatestByLanguage(cfg.language, 'series')
   ]);
   const items = [...movies, ...series];
-  runlog.record(`lang:${catalogId}`, items);
+  if (movies.length) runlog.record(`lang:${catalogId}-movie`, movies, false);
+  if (series.length) runlog.record(`lang:${catalogId}-series`, series, false);
   return { items, origin: 'discover', at: Date.now() };
 }
 
