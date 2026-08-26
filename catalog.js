@@ -262,6 +262,28 @@ async function warmAll() {
   }
 }
 
+/**
+ * Force a real, sequential rebuild of every catalog regardless of TTL —
+ * used by the daily scheduler in addon.js. `cache.warm()` alone is NOT
+ * enough here: once a key already holds a value, cache.get()'s stale path
+ * kicks a background refresh and returns immediately without awaiting it,
+ * so a naive `for` loop of warm() calls would fire all 5 platforms'
+ * refreshes nearly in parallel instead of one at a time — the exact
+ * concurrent-TMDB-connection-reset bug warmAll() was written to avoid.
+ * Clearing each key first forces cache.get() down its cold path, which does
+ * await the refresh, preserving true one-at-a-time sequencing.
+ */
+async function refreshAll() {
+  for (const p of Object.values(PLATFORMS)) {
+    cache.clear(`catalog:${p.id}`);
+    await cache.warm(`catalog:${p.id}`, p.ttl, () => build(p.id));
+  }
+  for (const id of Object.keys(LANGUAGE_CATALOGS)) {
+    cache.clear(`langcatalog:${id}`);
+    await cache.warm(`langcatalog:${id}`, config.TTL.zee5, () => buildLanguageCatalog(id));
+  }
+}
+
 module.exports = {
   PLATFORMS,
   LANGUAGE_CATALOGS,
@@ -269,5 +291,6 @@ module.exports = {
   getTrendingCatalog,
   getLanguageCatalog,
   build,
-  warmAll
+  warmAll,
+  refreshAll
 };

@@ -4,7 +4,7 @@ const { addonBuilder, getRouter } = require('stremio-addon-sdk');
 const express = require('express');
 const config = require('./config');
 const cache = require('./cache');
-const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguageCatalog, warmAll } = require('./catalog');
+const { PLATFORMS, LANGUAGE_CATALOGS, getCatalog, getTrendingCatalog, getLanguageCatalog, warmAll, refreshAll } = require('./catalog');
 const search = require('./search');
 const runlog = require('./runlog');
 const { renderRunLogPage } = require('./runlog_html');
@@ -92,7 +92,7 @@ if (config.OPENROUTER_API_KEY) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.1.6',
+  version: '0.1.7',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -195,6 +195,18 @@ async function main() {
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);
   console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog (html) / /runlog.json`);
   console.log(`[boot] install in Stremio via: stremio://${config.HOST}:${config.PORT}/manifest.json`);
+
+  // Refresh was previously demand-driven only (cache.get()'s stale-while-
+  // revalidate kicks in only when a request lands after TTL expiry) — a
+  // catalog nobody queried after 24h just stayed stale indefinitely. This is
+  // the actual daily trigger, independent of traffic.
+  const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    console.log('[refresh] daily rebuild starting');
+    refreshAll()
+      .then(() => console.log('[refresh] daily rebuild done'))
+      .catch(err => console.error('[refresh] daily rebuild failed:', err.message));
+  }, REFRESH_INTERVAL_MS);
 }
 
 if (require.main === module) {
