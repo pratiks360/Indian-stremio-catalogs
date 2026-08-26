@@ -60,8 +60,21 @@ function load_and_hydrate() {
  * @param {string} catalogKey e.g. `platform:netflix`, `lang:marathi-latest`
  * @param {Array} items hydrated items just built (must carry imdb_id/name/type/year)
  * @param {boolean} isTrending true for trending, false for movie/series/marathi
+ *
+ * Never throws — this is a logging side-feature, not part of the catalog
+ * pipeline. A bug here must not take down real catalog serving (it did once:
+ * an uncaught error in this function bubbled up through build() and emptied
+ * jiohotstar/sonyliv/marathi-latest until fixed).
  */
 function record(catalogKey, items, isTrending = false) {
+  try {
+    recordUnsafe(catalogKey, items, isTrending);
+  } catch (err) {
+    console.error(`[runlog] record failed for "${catalogKey}": ${err.message}`);
+  }
+}
+
+function recordUnsafe(catalogKey, items, isTrending) {
   const state = load_and_hydrate();
   const currIds = items.map(it => it.imdb_id).filter(Boolean);
 
@@ -83,6 +96,7 @@ function record(catalogKey, items, isTrending = false) {
     // Movies/Shows/Marathi: accumulate forever
     const prevIds = state.accumulated[catalogKey] || new Set();
     const added = items.filter(it => it.imdb_id && !prevIds.has(it.imdb_id));
+    state.accumulated[catalogKey] = prevIds;
     for (const id of currIds) state.accumulated[catalogKey].add(id);
 
     if (added.length) {
