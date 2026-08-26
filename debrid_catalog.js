@@ -18,39 +18,87 @@ const cache = require('./cache');
 const tmdb = require('./tmdb');
 const rd = require('./lib/realdebrid');
 
-// Everything from the first quality/source/season marker onward is release
-// metadata, not part of the title.
+/**
+ * Scene naming is "Title.YEAR.quality.source.codec-GROUP" (or the same with
+ * spaces/underscores). The year is therefore the most reliable end-of-title
+ * marker there is — far more so than trying to enumerate every quality tag
+ * that might follow. Cut there when a year exists; fall back to the first
+ * recognised metadata token when it does not.
+ */
 const NOISE = new RegExp(
-  '[._ ]\\(?(' +
-    '\\d{3,4}p|4k|2160|1080|720|480|' +
-    's\\d{1,2}(e\\d{1,3})?|season[._ ]?\\d+|' +
-    'web[-._ ]?dl|webrip|bluray|bdrip|brrip|hdrip|hdtv|dvdrip|remux|cam|hdcam|' +
-    'x26[45]|h[._ ]?26[45]|hevc|avc|xvid|divx|' +
-    'ddp?[._ ]?\\d|dts|aac|ac3|atmos|truehd|eac3|' +
-    'hdr10?\\+?|dolby|dv|sdr|' +
-    'multi|dual[._ ]?audio|hindi|english|esub|msub' +
-  ')\\b.*$',
+  '\\b(' +
+    '\\d{3,4}p|4k|uhd|' +
+    's\\d{1,2}(e\\d{1,3})?|season|seasons|complete|' +
+    'web[- ]?dl|webrip|web|bluray|blu[- ]?ray|bdrip|brrip|hdrip|hdtv|dvdrip|dvd9|dvd5|' +
+    'remux|untouched|ntsc|pal|cam|hdcam|' +
+    'x26[45]|h[- ]?26[45]|hevc|avc|xvid|divx|mpeg2|' +
+    'ddp?\\d?|dts([- ]?hd)?|aac|ac3|eac3|atmos|truehd|flac|' +
+    'hdr10?\\+?|dolby|dv|sdr|hybrid|repack|proper|extended|uncensored|' +
+    'multi|dual[- ]?audio|esub|msub|' +
+    '\\d+[- ]?film|collection|trilogy|duology|' +
+    // Language/source words that trail a title once the year is gone.
+    'hindi|english|tamil|telugu|marathi|bengali|punjabi|malayalam|kannada|' +
+    'netflix|prime|hotstar|sonyliv|zee5|amzn|nf|hmax|dsnp' +
+  ')\\b',
   'i'
 );
 
-function cleanReleaseName(name) {
+// Underscores are word characters, so a naive \bseason never matches
+// "..._Season_1_...". Everything below therefore runs on a separated form
+// where . _ and - between words have become spaces.
+function separatorsToSpaces(name) {
   let s = String(name).replace(/\.(mkv|mp4|avi|m4v|ts)$/i, '');
-  s = s.replace(NOISE, '');
+
+  // Release sites prepend their domain: "www.1TamilBlasters.garden - Title".
+  // Done BEFORE dots become spaces so a real dotted domain is required —
+  // matching bare TLD words after separator-flattening ate the title of
+  // "Welcome to the Jungle" via the "to" in it.
+  s = s.replace(/^\s*(?:www\.)?[\w-]+\.[a-z]{2,10}\s*-\s*/i, '');
+
   s = s.replace(/[._]+/g, ' ');
-  s = s.replace(/[[({].*?[\])}]/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
-  return s;
+
+  // "S01Complete" glues the season marker to the next word, hiding it from
+  // every \b-anchored pattern below.
+  s = s.replace(/\b(s\d{1,2})(complete|comp)\b/gi, '$1 $2');
+
+  return s.replace(/\s+/g, ' ').trim();
 }
 
-/** Trailing 4-digit year, if the release carries one. */
+function cleanReleaseName(name) {
+  let s = separatorsToSpaces(name);
+
+  // Unwrap a bracketed year before brackets are discarded — "(2026)" is the
+  // end-of-title marker, and dropping it first loses the best cut point.
+  s = s.replace(/[[({]\s*((?:19|20)\d{2})(?:\s*-\s*(?:19|20)\d{2})?\s*[\])}]/g, ' $1 ');
+  s = s.replace(/[[({].*?[\])}]/g, ' ');
+
+  // Cut at the release year; otherwise at the first metadata token.
+  const year = /\b(19\d{2}|20\d{2})\b/.exec(s);
+  if (year && year.index > 0) {
+    s = s.slice(0, year.index);
+  }
+  const noise = NOISE.exec(s);
+  if (noise && noise.index > 0) s = s.slice(0, noise.index);
+
+  // Trim before the trailing-word strips, or their `$` anchors never match.
+  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/[-–—:~,]+$/, '').trim();
+  // "Game of Thrones The Complete Seasons" cuts at "Complete", leaving a
+  // stranded article that would break the TMDB lookup.
+  s = s.replace(/\s+(the|a|an|of|and|in|on)$/i, '').trim();
+  return s.replace(/[-–—:~,]+$/, '').trim();
+}
+
+/** Release year, if the name carries one. */
 function extractYear(name) {
-  const m = /\b(19\d{2}|20\d{2})\b/.exec(String(name));
+  const m = /\b(19\d{2}|20\d{2})\b/.exec(separatorsToSpaces(name));
   return m ? Number(m[1]) : null;
 }
 
 /** A season/episode marker means it is a series, whatever TMDB thinks. */
 function looksLikeSeries(name) {
-  return /\bs\d{1,2}(e\d{1,3})?\b|\bseason[._ ]?\d+\b|\bcomplete\b/i.test(String(name));
+  const s = separatorsToSpaces(name);
+  return /\bs\d{1,2}(e\d{1,3})?\b|\bseasons?\b|\bcomplete\b|\bepisodes?\b/i.test(s);
 }
 
 async function build() {
@@ -123,4 +171,4 @@ function toMeta(item) {
   };
 }
 
-module.exports = { getCatalog, build, cleanReleaseName };
+module.exports = { getCatalog, build, cleanReleaseName, looksLikeSeries, extractYear };
