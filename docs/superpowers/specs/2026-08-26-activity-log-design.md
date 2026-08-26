@@ -27,7 +27,7 @@ Five event types, each a JSON object with a `type` field plus these fields:
 
 | Event type | Fields |
 |---|---|
-| `stream_search` | `timestamp`, `imdbId`, `title`, `searchType` (movie/series), `prowlarrQuery`, `releaseCount`, `success` |
+| `stream_search` | `timestamp`, `imdbId`, `title`, `searchType` (movie/series), `prowlarrQuery`, `releaseCount`, `releases` (top 10 result titles), `success` |
 | `user_click` | `timestamp`, `imdbId`, `releaseTitle`, `indexer`, `infoHash`, `deliveryPath` (p2p/rd) |
 | `torrent_fetch` | `timestamp`, `releaseTitle`, `indexer`, `success`, `errorMsg`, `duration_ms` |
 | `catalog_refresh` | `timestamp`, `platform`, `itemsAdded`, `duration_ms` |
@@ -38,7 +38,7 @@ Five event types, each a JSON object with a `type` field plus these fields:
 ## activity-log.js API
 
 ```js
-streamSearch({ imdbId, title, searchType, prowlarrQuery, releaseCount, success })
+streamSearch({ imdbId, title, searchType, prowlarrQuery, releaseCount, releases, success })
 userClick({ imdbId, releaseTitle, indexer, infoHash, deliveryPath })
 torrentFetch({ releaseTitle, indexer, success, errorMsg, duration_ms })
 catalogRefresh({ platform, itemsAdded, duration_ms })

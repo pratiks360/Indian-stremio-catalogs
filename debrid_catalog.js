@@ -17,6 +17,7 @@ const config = require('./config');
 const cache = require('./cache');
 const tmdb = require('./tmdb');
 const rd = require('./lib/realdebrid');
+const activityLog = require('./activity-log');
 
 /**
  * Scene naming is "Title.YEAR.quality.source.codec-GROUP" (or the same with
@@ -103,6 +104,7 @@ function looksLikeSeries(name) {
 
 async function build() {
   if (!config.REALDEBRID_TOKEN) return { items: [], at: Date.now() };
+  const t0 = Date.now();
 
   const torrents = await rd.listTorrents(100);
   const downloaded = torrents.filter(t => t.status === 'downloaded');
@@ -141,6 +143,7 @@ async function build() {
   }
 
   console.log(`[debrid] ${items.length}/${downloaded.length} downloaded torrents resolved`);
+  activityLog.catalogRefresh({ platform: 'realdebrid', itemsAdded: items.length, duration_ms: Date.now() - t0 });
   return { items, at: Date.now() };
 }
 

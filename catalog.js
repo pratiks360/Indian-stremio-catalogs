@@ -12,6 +12,7 @@ const config = require('./config');
 const cache = require('./cache');
 const tmdb = require('./tmdb');
 const runlog = require('./runlog');
+const activityLog = require('./activity-log');
 
 const PLATFORMS = {
   netflix: {
@@ -74,6 +75,7 @@ const PLATFORMS = {
 async function build(platformId) {
   const platform = PLATFORMS[platformId];
   if (!platform) throw new Error(`unknown platform: ${platformId}`);
+  const t0 = Date.now();
 
   // 1. ranking
   let ranking = null;
@@ -96,6 +98,7 @@ async function build(platformId) {
       if (movies.length) runlog.record(`platform:${platformId}-movie`, movies, false);
       if (series.length) runlog.record(`platform:${platformId}-series`, series, false);
       runlog.record(`platform:${platformId}-trending`, items, true);
+      activityLog.catalogRefresh({ platform: platformId, itemsAdded: items.length, duration_ms: Date.now() - t0 });
       return { items, origin: 'scrape', at: Date.now() };
     }
     console.error(`[${platformId}] nothing resolved from ranking -> TMDB Discover fallback`);
@@ -117,6 +120,7 @@ async function build(platformId) {
   if (movies.length) runlog.record(`platform:${platformId}-movie`, movies, false);
   if (series.length) runlog.record(`platform:${platformId}-series`, series, false);
   runlog.record(`platform:${platformId}-trending`, items, true);
+  activityLog.catalogRefresh({ platform: platformId, itemsAdded: items.length, duration_ms: Date.now() - t0 });
   return { items, origin: 'discover', at: Date.now() };
 }
 
@@ -205,6 +209,7 @@ const LANGUAGE_CATALOGS = {
 async function buildLanguageCatalog(catalogId) {
   const cfg = LANGUAGE_CATALOGS[catalogId];
   if (!cfg) throw new Error(`unknown language catalog: ${catalogId}`);
+  const t0 = Date.now();
 
   const [movies, series] = await Promise.all([
     tmdb.discoverLatestByLanguage(cfg.language, 'movie'),
@@ -213,6 +218,7 @@ async function buildLanguageCatalog(catalogId) {
   const items = [...movies, ...series];
   if (movies.length) runlog.record(`lang:${catalogId}-movie`, movies, false);
   if (series.length) runlog.record(`lang:${catalogId}-series`, series, false);
+  activityLog.catalogRefresh({ platform: `lang:${catalogId}`, itemsAdded: items.length, duration_ms: Date.now() - t0 });
   return { items, origin: 'discover', at: Date.now() };
 }
 

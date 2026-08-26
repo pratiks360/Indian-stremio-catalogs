@@ -26,6 +26,7 @@ const tmdb = require('./tmdb');
 const prowlarr = require('./lib/prowlarr');
 const { pickFileIdx } = require('./lib/bencode');
 const rd = require('./lib/realdebrid');
+const activityLog = require('./activity-log');
 
 /**
  * Stremio addresses an episode as `tt1234567:5:27`.
@@ -87,7 +88,21 @@ function qualityTags(name) {
 async function hydrateInto(out, ranked, from, to) {
   for (let i = from; i < Math.min(to, ranked.length); i++) {
     const release = ranked[i];
-    const torrent = await prowlarr.fetchTorrent(release);
+    const t0 = Date.now();
+    let torrent;
+    try {
+      torrent = await prowlarr.fetchTorrent(release);
+      activityLog.torrentFetch({
+        releaseTitle: release.title, indexer: release.indexer,
+        success: Boolean(torrent), duration_ms: Date.now() - t0
+      });
+    } catch (err) {
+      activityLog.torrentFetch({
+        releaseTitle: release.title, indexer: release.indexer,
+        success: false, errorMsg: err.message, duration_ms: Date.now() - t0
+      });
+      continue;
+    }
     if (torrent) out.push({ release, torrent });
   }
   out.sort((a, b) => (b.release.seeders || 0) - (a.release.seeders || 0));
@@ -203,6 +218,13 @@ async function getStreams(type, id, baseUrl) {
         `${releases.length} releases, search ${searchMs}ms, ` +
         `hydrate ${Date.now() - tHydrate}ms -> ${out.length} playable`
       );
+      activityLog.streamSearch({
+        imdbId, title, searchType: type,
+        prowlarrQuery: title + (season != null ? ` S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}` : ''),
+        releaseCount: releases.length,
+        releases: releases.slice(0, 10).map(r => r.title),
+        success: out.length > 0
+      });
       return out;
     }),
     rdHashesP
@@ -302,21 +324,35 @@ async function resolveDebridLink(payloadB64) {
   const { u: downloadUrl, h: infoHash, t: releaseTitle } =
     JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
 
+  // This handler only runs when Stremio hits the RD play URL, i.e. the user
+  // actually pressed play on an RD stream — the only click signal the server
+  // ever sees (a P2P click never reaches this addon at all; Stremio's own
+  // torrent engine handles it entirely client-side).
+  activityLog.userClick({ releaseTitle, infoHash, deliveryPath: 'rd' });
+
   let torrents = await rd.listTorrents();
   let entry = rd.findByHash(torrents, infoHash);
 
   if (!entry) {
+    const t0 = Date.now();
     const buf = await fetchTorrentBuffer(downloadUrl);
     if (!buf) throw new Error('could not fetch torrent from Prowlarr');
     const id = await rd.addTorrentFile(buf);
     await rd.selectFiles(id);
     console.log(`[rd] added "${releaseTitle}" (${id})`);
+    activityLog.rdAction({ action: 'add', torrentHash: infoHash, success: true, status: 'queued', duration_ms: Date.now() - t0 });
     entry = { id, status: 'queued' };
   }
 
+  const tWait = Date.now();
   let info = entry.status === 'downloaded'
     ? await rd.torrentInfo(entry.id)
     : await rd.waitForDownloaded(entry.id, config.RD_WAIT_MS);
+  activityLog.rdAction({
+    action: 'poll', torrentHash: infoHash,
+    success: Boolean(info && info.status === 'downloaded'),
+    status: info ? info.status : 'timeout', duration_ms: Date.now() - tWait
+  });
 
   if (!info || info.status !== 'downloaded') {
     // Genuinely downloading. Leave it running — it will appear in the
@@ -341,7 +377,9 @@ async function resolveDebridLink(payloadB64) {
     });
   }
 
+  const tResolve = Date.now();
   const url = await rd.unrestrict(links[linkIdx]);
+  activityLog.rdAction({ action: 'resolve', torrentHash: infoHash, success: true, status: 'downloaded', duration_ms: Date.now() - tResolve });
   cache.clear('rd:torrents');
   return { url };
 }

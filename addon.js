@@ -10,6 +10,8 @@ const runlog = require('./runlog');
 const { renderRunLogPage } = require('./runlog_html');
 const stream = require('./stream');
 const debridCatalog = require('./debrid_catalog');
+const activityLog = require('./activity-log');
+const { renderActivityPage } = require('./activity_html');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -115,7 +117,7 @@ if (!STREAMING) {
 
 const manifest = {
   id: ADDON_ID,
-  version: '0.2.0',
+  version: '0.2.1',
   name: 'India OTT Charts',
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
@@ -248,6 +250,11 @@ async function main() {
     res.send(renderRunLogPage(runlog.getLog(limit)));
   });
 
+  app.get('/activity', (_, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(renderActivityPage(activityLog.readAll()));
+  });
+
   // Real-Debrid links can only be resolved at play time: the torrent may
   // need to be added first, and RD's instantAvailability endpoint that used
   // to answer this up front is gone (see lib/realdebrid.js).
@@ -270,6 +277,7 @@ async function main() {
   app.listen(config.PORT);
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);
   console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog (html) / /runlog.json`);
+  console.log(`[boot] activity log: http://${config.HOST}:${config.PORT}/activity`);
   console.log(`[boot] install in Stremio via: stremio://${config.HOST}:${config.PORT}/manifest.json`);
 
   // Refresh was previously demand-driven only (cache.get()'s stale-while-
@@ -283,6 +291,12 @@ async function main() {
       .then(() => console.log('[refresh] daily rebuild done'))
       .catch(err => console.error('[refresh] daily rebuild failed:', err.message));
   }, REFRESH_INTERVAL_MS);
+
+  // 7-day rolling retention on the activity log — same cadence as the
+  // catalog refresh above, plus once at boot so a long-running process
+  // doesn't wait a full day before its first trim.
+  activityLog.rotate();
+  setInterval(() => activityLog.rotate(), REFRESH_INTERVAL_MS);
 }
 
 if (require.main === module) {
