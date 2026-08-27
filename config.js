@@ -98,6 +98,13 @@ const config = {
   // these are the ones worth having.
   STREAM_MAX_RELEASES: 6,
 
+  // Once a hydrated release has at least this many seeders, stop fetching
+  // further .torrent files for this request — releases are seeder-sorted
+  // first, so a hit this good this early means the rest of the sequential
+  // fetch queue (up to STREAM_MAX_RELEASES) is very unlikely to matter for
+  // playability, and skipping it directly cuts latency on the common case.
+  EARLY_STOP_SEEDERS: 10,
+
   // After serving an episode, quietly pull the NEXT one into RD so it is
   // ready. Only ever one episode ahead, and only for releases that qualify
   // for RD in the first place (see hasPasskey gating in stream.js).

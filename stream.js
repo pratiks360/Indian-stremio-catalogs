@@ -104,7 +104,15 @@ async function hydrateInto(out, ranked, from, to) {
       });
       continue;
     }
-    if (torrent) out.push({ release, torrent });
+    if (torrent) {
+      out.push({ release, torrent });
+      // ranked is seeder-sorted descending, so a hit this good this early
+      // means the rest of the sequential fetch queue is very unlikely to
+      // matter — stop here rather than keep fetching lower-seeded releases
+      // that only cost latency (Stremio itself gives up waiting on an
+      // addon after ~10-20s, well under STREAM_MAX_RELEASES's worst case).
+      if ((release.seeders || 0) >= config.EARLY_STOP_SEEDERS) break;
+    }
   }
   out.sort((a, b) => (b.release.seeders || 0) - (a.release.seeders || 0));
   return out;
