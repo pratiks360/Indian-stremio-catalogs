@@ -6,9 +6,13 @@ Wants=network-online.target
 [Service]
 Type=notify
 User=ubuntu
+# vfs-cache-mode writes (not minimal): writing a large completed file onto
+# the mount (lib/localseed.js's moveToMount()) needs a real local write
+# buffer — minimal/off mode produced "EIO: i/o error" on copyfile for a
+# 500MB+ file in live testing.
 ExecStart=/usr/bin/rclone mount gdrive: /mnt/gdrive \
   --config /home/ubuntu/.config/rclone/rclone.conf \
-  --vfs-cache-mode minimal \
+  --vfs-cache-mode writes \
   --allow-other \
   --dir-cache-time 1h
 ExecStop=/bin/fusermount -u /mnt/gdrive

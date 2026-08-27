@@ -133,10 +133,12 @@ to the box's overall RAM usage and must be accounted for in practice.
   alongside the existing `deploy/stremio-india-ott.service`), so it comes
   up automatically on boot and restarts if it crashes — the addon's
   `/local/resolve/` handler depends on `/mnt/gdrive` being present.
-- `vfs-cache-mode` kept minimal (e.g. `off` or `minimal`) since the addon
-  only ever moves already-complete files onto the mount and reads
-  already-complete files back — it never needs the mount itself to buffer
-  a partial write.
+- `vfs-cache-mode writes` — not `minimal`/`off`. The original reasoning
+  here ("the addon only ever moves already-complete files, so the mount
+  never needs to buffer a write") turned out wrong in practice: live
+  testing hit `EIO: i/o error` copying a 500MB+ completed file onto a
+  `minimal`-mode mount. `writes` mode gives rclone a real local write
+  buffer for the file being copied in, which resolved it.
 
 ## Error Handling
 
