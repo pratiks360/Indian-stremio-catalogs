@@ -12,6 +12,7 @@ const stream = require('./stream');
 const debridCatalog = require('./debrid_catalog');
 const activityLog = require('./activity-log');
 const { renderActivityPage } = require('./activity_html');
+const localseed = require('./lib/localseed');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -274,10 +275,27 @@ async function main() {
     });
   }
 
+  // Local-seed: this addon downloads/seeds the torrent on its own VPS for
+  // releases RD can't take (passkey-bearing). Self-disables when the Drive
+  // mount is not present — see lib/localseed.js.
+  if (localseed.isEnabled()) {
+    app.get('/local/resolve/:payload', async (req, res) => {
+      try {
+        await stream.resolveLocalSeed(req, res, req.params.payload);
+      } catch (err) {
+        console.error(`[localseed] resolve failed: ${err.message}`);
+        if (!res.headersSent) {
+          res.status(502).type('text/plain').send(`Local seedbox error: ${err.message}`);
+        }
+      }
+    });
+  }
+
   app.listen(config.PORT);
   console.log(`[boot] manifest: http://${config.HOST}:${config.PORT}/manifest.json`);
   console.log(`[boot] run log: http://${config.HOST}:${config.PORT}/runlog (html) / /runlog.json`);
   console.log(`[boot] activity log: http://${config.HOST}:${config.PORT}/activity`);
+  console.log(`[boot] local-seed: ${localseed.isEnabled() ? 'enabled (' + config.LOCALSEED.MOUNT_PATH + ')' : 'disabled (no mount)'}`);
   console.log(`[boot] install in Stremio via: stremio://${config.HOST}:${config.PORT}/manifest.json`);
 
   // Refresh was previously demand-driven only (cache.get()'s stale-while-
@@ -297,6 +315,14 @@ async function main() {
   // doesn't wait a full day before its first trim.
   activityLog.rotate();
   setInterval(() => activityLog.rotate(), REFRESH_INTERVAL_MS);
+
+  // Same daily cadence: keep the Google Drive mount under its usage cap.
+  if (localseed.isEnabled()) {
+    localseed.sweepEviction().catch(err => console.error('[localseed] eviction sweep failed:', err.message));
+    setInterval(() => {
+      localseed.sweepEviction().catch(err => console.error('[localseed] eviction sweep failed:', err.message));
+    }, REFRESH_INTERVAL_MS);
+  }
 }
 
 if (require.main === module) {
