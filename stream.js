@@ -196,11 +196,17 @@ function toLocalSeedStream({ release, torrent }, season, episode) {
   // season/episode ride along in the payload — pickFileIdx needs them to
   // select the right file out of a season-pack torrent at resolve time,
   // and Stremio's play request carries no season/episode query param of
-  // its own to recover them from otherwise.
+  // its own to recover them from otherwise. guid/downloadUrl let the
+  // resolve step locate the real .torrent file (already fetched and
+  // cached by lib/prowlarr.js) rather than reconstructing a bare magnet —
+  // these are private trackers with DHT/PEX disabled, so a magnet alone
+  // has no way to fetch the info dict and would hang forever.
   const payload = localseed.encodePayload({
     infoHash: torrent.infoHash,
     trackers: torrent.trackers,
     title: release.title,
+    guid: release.guid,
+    downloadUrl: release.downloadUrl,
     season,
     episode
   });
@@ -437,8 +443,8 @@ async function resolveDebridLink(payloadB64) {
  * the request — Stremio's play request carries no such query param.
  */
 async function resolveLocalSeed(req, res, payloadB64) {
-  const { infoHash, trackers, title, season, episode } = localseed.decodePayload(payloadB64);
-  await localseed.streamRelease(req, res, { infoHash, trackers, title }, season, episode);
+  const { infoHash, trackers, title, guid, downloadUrl, season, episode } = localseed.decodePayload(payloadB64);
+  await localseed.streamRelease(req, res, { infoHash, trackers, title, guid, downloadUrl }, season, episode);
 }
 
 module.exports = { getStreams, resolveDebridLink, resolveLocalSeed, parseStreamId };
