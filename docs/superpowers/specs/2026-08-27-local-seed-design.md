@@ -1,4 +1,4 @@
-# Local Seedbox (VPS Download + Google Drive Archive) — Design Spec
+# Local Seedbox (VPS Download + Google Drive Mount) — Design Spec
 
 Date: 2026-08-27
 
@@ -19,52 +19,77 @@ This feature adds a third stream option for exactly those passkey releases:
 download and seed the torrent from the addon's own VPS (a legitimate
 seedbox — the tracker sees the user's own passkey announcing from a single
 consistent, user-controlled IP, unlike a third-party service), stream it to
-Stremio over plain HTTP while it downloads, and archive the finished file to
-Google Drive for reuse without needing the VPS's own disk to hold everything
-long-term.
+Stremio over plain HTTP while it downloads, then move the finished file onto
+a Google Drive mount so the VPS's own disk (34GB free) only ever has to hold
+what's actively downloading right now, not the whole accumulated library.
+Replays stream straight off the mount — no re-download.
 
 ## Architecture
 
 - `lib/localseed.js` — new module, mirrors the shape of `lib/realdebrid.js`.
   Owns one long-lived `WebTorrent.Client()` instance for the addon process.
-- `lib/gdrive.js` — thin Google Drive API wrapper (OAuth2 refresh-token
-  auth): upload, list, delete.
+- **rclone mount**, not a Drive API client — `rclone mount gdrive:
+  /mnt/gdrive` runs as its own systemd service, a separate Go process
+  outside the Node addon. Auth is set up once via `rclone config`'s own
+  interactive OAuth flow; the addon never touches Drive credentials
+  directly.
 - New stream option **"Local"**, offered alongside P2P for any release
   `hasPasskey` — i.e. exactly the releases RD already skips. RD-eligible
   releases are unaffected; this does not change the existing P2P/RD logic.
 - New endpoint `GET /local/resolve/:payload` (parallel to
   `/rd/resolve/:payload`) — payload carries infoHash, tracker list, and
   release title, same shape as the RD resolve payload. Stremio's play
-  request hits this URL; the addon starts (or resumes) the torrent locally
-  and streams the response.
+  request hits this URL; the addon starts (or resumes) the torrent, or
+  serves the already-completed file straight off the mount.
+
+### Why not write/stream the torrent directly on the mount
+
+BitTorrent writes pieces out of order as they arrive from different peers,
+not sequentially. rclone's mount cannot perform that kind of random-access
+write directly against Drive — to support it at all, rclone would fall back
+to caching the entire file locally anyway (`vfs-cache-mode=full`) before or
+while uploading. So downloading straight onto the mount would not avoid
+local disk usage during the download; it would use the same amount (or
+more, with added FUSE overhead) as downloading to local disk directly.
+Local disk during the active download is therefore unavoidable — what this
+design avoids is *accumulating* every download there permanently.
 
 ## Data Flow
 
 1. `stream.js` builds a `Local` stream entry for any `hasPasskey` release,
    pointing at `/local/resolve/:payload`.
 2. On play, `/local/resolve/:payload`:
-   - If the torrent is already active in the `WebTorrent.Client()` (a prior
-     request for the same title), reuse it.
-   - Else add it by infoHash + tracker list; WebTorrent starts fetching
-     pieces immediately.
-3. The addon selects the right file within the torrent (reusing
-   `pickFileIdx()` from `lib/bencode.js` for season packs) and pipes
-   `file.createReadStream({start, end})` directly into the HTTP response.
-   Stremio's own range requests naturally throttle to download progress —
-   this is standard WebTorrent server behavior, no custom buffering needed.
-4. On file completion: a background job uploads the file to the Drive
-   `stremio-seed` folder, tagging it with the release's `infoHash` in Drive
-   file metadata (dedupe key — same role `guid` plays in
-   `lib/prowlarr.js`'s existing disk cache).
+   - If the file already exists on the mount (`/mnt/gdrive/stremio-seed/`,
+     keyed by infoHash) from a previous download, stream it straight from
+     there — no torrent involved, no re-download.
+   - Else if the torrent is already active in the `WebTorrent.Client()` (a
+     prior request for the same title, still downloading), reuse it.
+   - Else add it by infoHash + tracker list to local disk
+     (`data/localseed/`); WebTorrent starts fetching pieces immediately.
+3. While downloading to local disk, the addon selects the right file within
+   the torrent (reusing `pickFileIdx()` from `lib/bencode.js` for season
+   packs) and pipes `file.createReadStream({start, end})` directly into the
+   HTTP response. Stremio's own range requests naturally throttle to
+   download progress — standard WebTorrent server behavior, no custom
+   buffering needed.
+4. On download completion: the addon moves the finished file from
+   `data/localseed/` to `/mnt/gdrive/stremio-seed/`, named/tagged by the
+   release's infoHash (dedupe key — same role `guid` plays in
+   `lib/prowlarr.js`'s existing disk cache). This frees local disk
+   immediately; the move itself is safe because the file is complete and no
+   longer being written — the risky case (reading a file on the mount while
+   it's still being written) never occurs.
 5. The torrent keeps seeding locally for a configured window after
-   completion (24h default, ratio/goodwill), then WebTorrent removes it —
-   the local video file itself stays on disk until LRU eviction reclaims it.
+   completion (24h default, ratio/goodwill) before WebTorrent removes it —
+   independent of the move to the mount, which already happened in step 4.
 
 ## Concurrency & Memory
 
 The VPS has ~954MB RAM total; baseline OS + Prowlarr + this addon already
 use roughly half of it, leaving limited headroom for WebTorrent's own piece
-buffers.
+buffers. `rclone mount` runs as its own process outside the Node addon, so
+it does not count against the addon's own memory ceiling — but it does add
+to the box's overall RAM usage and must be accounted for in practice.
 
 - Hard cap: **3 concurrent local-seed torrents** via the single
   `WebTorrent.Client()`.
@@ -78,60 +103,63 @@ buffers.
   silently queuing or risking an OOM.
 - The exact RSS ceiling is tuned during implementation against real
   measured growth per active torrent, starting conservatively (well under
-  the box's total RAM, leaving room for the OS, Prowlarr, and the rest of
-  the addon).
+  the box's total RAM, leaving room for the OS, Prowlarr, rclone, and the
+  rest of the addon).
 
 ## Storage & Eviction
 
 - Local disk: `data/localseed/` — video files only, separate from the
-  existing `.torrent` metadata cache in `data/torrents/`.
-- Two-tier LRU eviction, both keyed on **least-recently-played**, not
-  upload time:
-  - **Local disk**: before starting a new download, if free space drops
-    below a reserved floor, delete completed local files (oldest-played
-    first) until there is room. A file already archived on Drive is safe to
-    delete locally — a later replay simply re-downloads it.
-  - **Google Drive**: a periodic sweep (daily, alongside the existing
-    catalog-refresh interval in `addon.js`) checks total usage in the
-    `stremio-seed` folder against a configured cap and deletes the oldest
-    files first when over it.
+  existing `.torrent` metadata cache in `data/torrents/`. Only ever holds
+  files actively downloading or just-completed-and-not-yet-moved; not a
+  long-term store, so eviction pressure here is minimal by design.
+- Mount (`/mnt/gdrive/stremio-seed/`) is the long-term store. LRU eviction
+  keyed on **least-recently-played**: a periodic sweep (daily, alongside
+  the existing catalog-refresh interval in `addon.js`) checks usage via
+  `rclone about gdrive:` against a configured cap and deletes the
+  oldest-played files first when over it, using a plain `fs.unlink` on the
+  mount path.
+- If local disk is ever still low when a new download needs to start (e.g.
+  several large downloads in flight against the 3-concurrent cap), the
+  request is rejected the same way as hitting the memory ceiling, rather
+  than starting a download it may not be able to finish.
 
-## Google Drive Auth
+## rclone Mount Setup
 
-- OAuth2 refresh-token flow — Drive's write API does not support a
-  permanent API key. One-time setup: authorize via Google's consent screen,
-  store the resulting refresh token in `.env`
-  (`GDRIVE_CLIENT_ID`, `GDRIVE_CLIENT_SECRET`, `GDRIVE_REFRESH_TOKEN`), the
-  same pattern `REALDEBRID_TOKEN` already follows.
-- A one-off script, `scripts/gdrive_auth.js`, walks through the consent flow
-  locally and prints the refresh token to paste into `.env`. Not part of the
-  running addon.
-- `lib/gdrive.js` exchanges the refresh token for short-lived access tokens
-  automatically — no manual renewal needed afterward.
-- All uploads go to one fixed folder (`stremio-seed`), created on first use
-  if it does not already exist.
+- One-time setup on the VPS: `rclone config` walks through Google's OAuth
+  consent flow interactively and stores the resulting token in rclone's own
+  config file (`~/.config/rclone/rclone.conf`) — the addon never sees or
+  stores Drive credentials itself.
+- The mount runs as a systemd service (`rclone-gdrive-mount.service`,
+  alongside the existing `deploy/stremio-india-ott.service`), so it comes
+  up automatically on boot and restarts if it crashes — the addon's
+  `/local/resolve/` handler depends on `/mnt/gdrive` being present.
+- `vfs-cache-mode` kept minimal (e.g. `off` or `minimal`) since the addon
+  only ever moves already-complete files onto the mount and reads
+  already-complete files back — it never needs the mount itself to buffer
+  a partial write.
 
 ## Error Handling
 
 - WebTorrent add failure (bad infoHash/trackers, no reachable peers) →
   same `pending`-style response as RD's "still downloading" — Stremio shows
   it as unavailable rather than erroring hard.
-- Drive upload failure → logged via `console.warn`; the file stays local
-  only and playback is unaffected (upload happens in the background, after
-  playback has already started). Retried once on the next daily eviction
-  sweep; given up after that (logged, not retried indefinitely).
-- Memory ceiling hit → the new request is rejected immediately with a clear
-  "server busy" response rather than queuing indefinitely.
-- Disk full despite an eviction attempt (e.g. a single file larger than the
-  reserved floor) → the download is aborted and the error is surfaced the
-  same way an existing Prowlarr torrent-fetch failure is.
+- Move-to-mount failure (rclone mount unreachable, Drive quota exceeded) →
+  logged via `console.warn`; the file stays in `data/localseed/` and is
+  still playable from there. Retried on the next daily eviction sweep.
+- Memory ceiling or local-disk-too-low hit → the new request is rejected
+  immediately with a clear "server busy" response rather than queuing
+  indefinitely or starting a download that can't complete.
+- Mount unavailable entirely (systemd service down) → `/local/resolve/`
+  falls back to the local-disk/WebTorrent path only (no replay-from-mount
+  shortcut, no move-on-completion); logged as a warning so the mount
+  service getting stuck is visible.
 
 ## Activity Log Integration
 
 Reuses the existing `activity-log.js` module
 (`docs/superpowers/specs/2026-08-26-activity-log-design.md`). A new
 `local_seed` event type, and a corresponding 6th tab on the existing
-`/activity` page, logs: torrent added, download start/complete, Drive
-upload result, and eviction events (local and Drive), following the same
+`/activity` page, logs: torrent added, download start/complete, move-to-
+mount result, and mount eviction events, following the same
 line-delimited-JSON, 7-day-retention pattern the other five event types
 already use.
