@@ -195,9 +195,9 @@ const {
   const capBytes = 6 * 1024 * 1024 * 1024;
 
   const targets = selectEvictionTargets(files, usedBytes, capBytes);
-  // Oldest-played first: 'b' (100) then 'c' (200) frees 6GB, bringing 9GB
-  // down to 3GB, under the 6GB cap — 'a' (300, newest) must not be touched.
-  assert.deepStrictEqual(targets.map(f => f.path), ['b', 'c']);
+  // Oldest-played first: removing just 'b' (100, 4GB) already brings 9GB
+  // down to 5GB, under the 6GB cap — 'c' and 'a' must not be touched.
+  assert.deepStrictEqual(targets.map(f => f.path), ['b']);
 
   const nothingToEvict = selectEvictionTargets(files, 5 * 1024 * 1024 * 1024, capBytes);
   assert.deepStrictEqual(nothingToEvict, []);
