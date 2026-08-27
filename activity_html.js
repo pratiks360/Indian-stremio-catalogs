@@ -55,6 +55,56 @@ const TABS = [
   }
 ];
 
+function pct(n, d) {
+  return d ? Math.round((n / d) * 100) + '%' : '—';
+}
+
+function avg(nums) {
+  const vals = nums.filter(n => typeof n === 'number' && !Number.isNaN(n));
+  if (!vals.length) return '—';
+  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) + 'ms';
+}
+
+/**
+ * Headline numbers computed from the same (already-capped, latest-first)
+ * buckets the tabs render — a quick read on "is this healthy right now"
+ * before digging into individual rows.
+ */
+function computeSummary(buckets) {
+  const searches = buckets.stream_search || [];
+  const fetches = buckets.torrent_fetch || [];
+  const rd = buckets.rd_action || [];
+  const local = buckets.local_seed || [];
+
+  const todayCutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const isToday = e => {
+    const t = Date.parse(e.timestamp);
+    return !Number.isNaN(t) && t >= todayCutoff;
+  };
+  const searchesToday = searches.filter(isToday);
+
+  const failedFetchesByIndexer = {};
+  for (const f of fetches) {
+    if (f.success) continue;
+    const key = f.indexer || 'unknown';
+    failedFetchesByIndexer[key] = (failedFetchesByIndexer[key] || 0) + 1;
+  }
+  let worstIndexer = null;
+  for (const [name, count] of Object.entries(failedFetchesByIndexer)) {
+    if (!worstIndexer || count > worstIndexer.count) worstIndexer = { name, count };
+  }
+
+  return [
+    { label: 'Searches (24h)', value: String(searchesToday.length) },
+    { label: 'Search success', value: pct(searches.filter(e => e.success).length, searches.length) },
+    { label: 'Avg fetch time', value: avg(fetches.map(e => e.duration_ms)) },
+    { label: 'Fetch success', value: pct(fetches.filter(e => e.success).length, fetches.length) },
+    { label: 'Worst indexer', value: worstIndexer ? `${esc(worstIndexer.name)} (${worstIndexer.count} fail)` : '—' },
+    { label: 'RD actions', value: String(rd.length) },
+    { label: 'Local-seed events', value: String(local.length) }
+  ];
+}
+
 function renderActivityPage(buckets) {
   const panels = TABS.map((tab, i) => {
     const rows = buckets[tab.key] || [];
@@ -74,6 +124,10 @@ function renderActivityPage(buckets) {
 
   const tabButtons = TABS.map((tab, i) =>
     `<button class="tabbtn${i === 0 ? ' active' : ''}" data-target="panel-${tab.key}">${esc(tab.label)}</button>`
+  ).join('');
+
+  const summaryCards = computeSummary(buckets).map(s =>
+    `<div class="card"><div class="card-value">${s.value}</div><div class="card-label">${esc(s.label)}</div></div>`
   ).join('');
 
   return `<!doctype html>
@@ -98,11 +152,16 @@ function renderActivityPage(buckets) {
   td.none { color: #888; text-align: center; white-space: normal; }
   .yes { color: #2e9e44; }
   .no { color: #c0392b; }
+  .summary { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .card { background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.15); border-radius: 8px; padding: 0.7rem 1rem; min-width: 110px; }
+  .card-value { font-size: 1.3rem; font-weight: 700; }
+  .card-label { color: #888; font-size: 0.75rem; margin-top: 0.15rem; }
 </style>
 </head>
 <body>
   <h1>India OTT Charts — Activity Log</h1>
   <p class="sub">Latest 100 events per tab, newest first. 7-day retention.</p>
+  <div class="summary">${summaryCards}</div>
   <div class="tabs">${tabButtons}</div>
   ${panels}
   <script>
