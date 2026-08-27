@@ -132,10 +132,12 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
+const ADDON_VERSION = '0.2.1';
+
 const manifest = {
   id: ADDON_ID,
-  version: '0.2.1',
-  name: 'India OTT Charts',
+  version: ADDON_VERSION,
+  name: `Desi StreamHouse v${ADDON_VERSION}`,
   description:
     'Trending and top-ranked titles from Indian OTT platforms (India region), ' +
     'limited to English, Hindi and Marathi content. ' +
