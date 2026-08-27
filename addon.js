@@ -13,6 +13,7 @@ const debridCatalog = require('./debrid_catalog');
 const activityLog = require('./activity-log');
 const { renderActivityPage } = require('./activity_html');
 const localseed = require('./lib/localseed');
+const localseedCatalog = require('./lib/localseed_catalog');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -109,6 +110,21 @@ if (config.REALDEBRID_TOKEN) {
   console.warn('[manifest] Debrid Cached catalog not advertised — REALDEBRID_TOKEN is not set');
 }
 
+// What is already downloaded to the VPS and moved onto the Google Drive
+// mount, ready to replay instantly without re-searching.
+if (localseed.isEnabled()) {
+  for (const type of ['movie', 'series']) {
+    catalogs.push({
+      type,
+      id: 'iott-localseed',
+      name: 'VPS/Drive Downloaded',
+      extra: [{ name: 'skip', isRequired: false }]
+    });
+  }
+} else {
+  console.warn('[manifest] VPS/Drive Downloaded catalog not advertised — no Google Drive mount configured');
+}
+
 // Streams come from Prowlarr. Without it this stays a catalog-only addon,
 // exactly as before, and playback is left to whatever else is installed.
 const STREAMING = Boolean(config.PROWLARR_API_KEY);
@@ -171,6 +187,17 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
       return { metas, cacheMaxAge: 300, staleRevalidate: 600, origin };
     } catch (err) {
       console.error(`[catalog] debrid-cached failed: ${err.message}`);
+      return { metas: [] };
+    }
+  }
+
+  if (id === 'iott-localseed') {
+    try {
+      const { metas, origin } = await localseedCatalog.getCatalog(type);
+      console.log(`[catalog] localseed (${type}) -> ${metas.length} metas`);
+      return { metas, cacheMaxAge: 300, staleRevalidate: 600, origin };
+    } catch (err) {
+      console.error(`[catalog] localseed failed: ${err.message}`);
       return { metas: [] };
     }
   }
