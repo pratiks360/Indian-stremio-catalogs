@@ -46,6 +46,12 @@ const TABS = [
     label: 'RD Actions',
     cols: ['Time', 'Action', 'Torrent Hash', 'Status', 'Success', 'Duration (ms)'],
     row: e => [esc(e.timestamp), esc(e.action), esc(e.torrentHash), esc(e.status), ok(e.success), esc(e.duration_ms)]
+  },
+  {
+    key: 'local_seed',
+    label: 'Local Seed',
+    cols: ['Time', 'Release', 'Phase', 'Success', 'Duration (ms)', 'Error'],
+    row: e => [esc(e.timestamp), esc(e.releaseTitle), esc(e.phase), ok(e.success), esc(e.duration_ms), esc(e.errorMsg)]
   }
 ];
 

@@ -52,13 +52,17 @@ function rdAction({ action, torrentHash, success, status, duration_ms }) {
   record('rd_action', { action, torrentHash, success, status, duration_ms });
 }
 
+function localSeed({ infoHash, releaseTitle, phase, success, errorMsg, duration_ms }) {
+  record('local_seed', { infoHash, releaseTitle, phase, success, errorMsg, duration_ms });
+}
+
 /**
- * @returns {{stream_search:Array, user_click:Array, torrent_fetch:Array, catalog_refresh:Array, rd_action:Array}}
+ * @returns {{stream_search:Array, user_click:Array, torrent_fetch:Array, catalog_refresh:Array, rd_action:Array, local_seed:Array}}
  * Latest MAX_ROWS_PER_TAB per type, newest first. Malformed lines skipped.
  */
 function readAll() {
   const buckets = {
-    stream_search: [], user_click: [], torrent_fetch: [], catalog_refresh: [], rd_action: []
+    stream_search: [], user_click: [], torrent_fetch: [], catalog_refresh: [], rd_action: [], local_seed: []
   };
 
   let text;
@@ -103,4 +107,4 @@ function rotate() {
   }
 }
 
-module.exports = { streamSearch, userClick, torrentFetch, catalogRefresh, rdAction, readAll, rotate };
+module.exports = { streamSearch, userClick, torrentFetch, catalogRefresh, rdAction, localSeed, readAll, rotate };
