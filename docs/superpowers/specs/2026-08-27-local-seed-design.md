@@ -133,12 +133,24 @@ to the box's overall RAM usage and must be accounted for in practice.
   alongside the existing `deploy/stremio-india-ott.service`), so it comes
   up automatically on boot and restarts if it crashes — the addon's
   `/local/resolve/` handler depends on `/mnt/gdrive` being present.
-- `vfs-cache-mode writes` — not `minimal`/`off`. The original reasoning
-  here ("the addon only ever moves already-complete files, so the mount
-  never needs to buffer a write") turned out wrong in practice: live
-  testing hit `EIO: i/o error` copying a 500MB+ completed file onto a
-  `minimal`-mode mount. `writes` mode gives rclone a real local write
-  buffer for the file being copied in, which resolved it.
+- `vfs-cache-mode writes` — not `minimal`/`off`. Live testing hit
+  `EIO: i/o error` copying a 500MB+ completed file onto the mount; `writes`
+  mode gives rclone a real local write buffer, which is a more robust
+  setup for large writes regardless. **The actual root cause of that
+  specific EIO was traced separately to a Google API rate limit
+  (403 `RATE_LIMIT_EXCEEDED`) on rclone's shared client_id** — see the
+  rclone-setup note below. `vfs-cache-mode` was not the cause; kept as a
+  defensive improvement anyway.
+- **Known risk**: this remote uses rclone's shared client_id (see
+  `rclone-setup.md`), not a dedicated one. That shared client_id is a
+  single Google Cloud project used by every rclone user who skips the
+  "create your own client_id" step, so its request-rate quota is shared
+  globally — a rate-limit 403 was hit during testing after normal usage,
+  unrelated to anything specific this addon did. rclone itself also warns
+  the shared client_id is being retired in 2026. If rate-limit errors
+  recur, the fix is creating a dedicated Google Cloud OAuth client_id/secret
+  (`rclone config` → edit the `gdrive` remote) rather than tuning
+  `vfs-cache-mode` further.
 
 ## Error Handling
 
