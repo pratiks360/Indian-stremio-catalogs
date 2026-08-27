@@ -103,6 +103,28 @@ const config = {
   // for RD in the first place (see hasPasskey gating in stream.js).
   PREFETCH_NEXT_EPISODE: true,
 
+  // --- Local seedbox (VPS download + Google Drive mount) ----------------
+  // Passkey-bearing releases never get an RD option (see hasPasskey gating
+  // above) and depend on the playing device's own P2P connectivity, which
+  // fails on some devices/networks (observed: Google TV Streamer). This is
+  // the alternative: download via WebTorrent on the VPS itself (a
+  // legitimate seedbox — the tracker sees the user's own passkey from one
+  // consistent IP, unlike a third-party service), then move the finished
+  // file onto a Google Drive mount so local disk only ever holds what is
+  // actively downloading, not the accumulated library.
+  LOCALSEED: {
+    // Feature is entirely optional — self-disables if the mount path does
+    // not exist (see lib/localseed.js's isEnabled()).
+    MOUNT_PATH: process.env.GDRIVE_MOUNT_PATH || '/mnt/gdrive',
+    MOUNT_SUBDIR: 'stremio-seed',
+    LOCAL_DIR: path.join(__dirname, 'data', 'localseed'),
+    MAX_CONCURRENT: 3,
+    RSS_CEILING_BYTES: 300 * 1024 * 1024,
+    MIN_FREE_BYTES: 5 * 1024 * 1024 * 1024,
+    SEED_WINDOW_MS: 24 * 60 * 60 * 1000,
+    DRIVE_CAP_BYTES: 12 * 1024 * 1024 * 1024
+  },
+
   // TMDB is a HYDRATION source only: name -> imdb_id, poster, language.
   // It must never invent the ranking. When a platform scraper fails we serve
   // an empty catalog and log loudly, rather than substituting TMDB Discover
