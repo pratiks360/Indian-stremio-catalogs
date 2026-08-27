@@ -15,11 +15,17 @@ const {
   console.log('PASS: encodePayload/decodePayload round-trip');
 }
 
-// mountFilename
+// mountFilename — keyed on infoHash AND fileIdx, not infoHash alone, so two
+// different episodes of the same season-pack torrent get distinct
+// filenames on the mount (see the wrong-episode bug this fixed).
 {
-  assert.strictEqual(mountFilename('ABCDEF', 'Some.Release.2026.mkv'), 'abcdef.mkv');
-  assert.strictEqual(mountFilename('ABCDEF', 'Some.Release.2026.mp4'), 'abcdef.mp4');
-  assert.strictEqual(mountFilename('ABCDEF', 'no-extension-file'), 'abcdef.mkv');
+  assert.strictEqual(mountFilename('ABCDEF', 'Some.Release.2026.mkv', 0), 'abcdef.0.mkv');
+  assert.strictEqual(mountFilename('ABCDEF', 'Some.Release.2026.mp4', 3), 'abcdef.3.mp4');
+  assert.strictEqual(mountFilename('ABCDEF', 'no-extension-file', 0), 'abcdef.0.mkv');
+  assert.notStrictEqual(
+    mountFilename('ABCDEF', 'S01E01.mkv', 0),
+    mountFilename('ABCDEF', 'S01E02.mkv', 1)
+  );
   console.log('PASS: mountFilename');
 }
 
