@@ -27,6 +27,7 @@ const prowlarr = require('./lib/prowlarr');
 const { pickFileIdx } = require('./lib/bencode');
 const rd = require('./lib/realdebrid');
 const activityLog = require('./activity-log');
+const localseed = require('./lib/localseed');
 
 /**
  * Stremio addresses an episode as `tt1234567:5:27`.
@@ -178,6 +179,41 @@ function toDebridStream({ release, torrent }, baseUrl, cachedHint) {
 }
 
 /**
+ * The local-seed path: this addon downloads/seeds the torrent on its own
+ * VPS. Only offered for releases RD already excludes (hasPasskey) — see
+ * lib/localseed.js's header comment for why that is safe here but not for
+ * a third-party service like RD.
+ */
+function toLocalSeedStream({ release, torrent }, season, episode) {
+  const tags = qualityTags(release.title);
+  const detail = [
+    tags.join(' '),
+    fmtSize(torrent.totalBytes),
+    `${release.seeders != null ? release.seeders : '?'} seeds`,
+    release.indexer
+  ].filter(Boolean).join(' · ');
+
+  // season/episode ride along in the payload — pickFileIdx needs them to
+  // select the right file out of a season-pack torrent at resolve time,
+  // and Stremio's play request carries no season/episode query param of
+  // its own to recover them from otherwise.
+  const payload = localseed.encodePayload({
+    infoHash: torrent.infoHash,
+    trackers: torrent.trackers,
+    title: release.title,
+    season,
+    episode
+  });
+
+  return {
+    name: 'Local',
+    title: `${release.title}\n${detail}`,
+    _payload: payload,
+    behaviorHints: { bingeGroup: `prowlarr-local-${tags.join('-') || 'sd'}`, notWebReady: false }
+  };
+}
+
+/**
  * @param {'movie'|'series'} type
  * @param {string} id  e.g. tt1234567 or tt1234567:5:27
  * @param {string} baseUrl public origin of this addon, for RD resolve links
@@ -240,8 +276,16 @@ async function getStreams(type, id, baseUrl) {
     // that cannot get a tracker account banned.
     streams.push(toDirectStream(item, season, episode));
 
+    if (item.torrent.hasPasskey) {
+      if (localseed.isEnabled()) {
+        const local = toLocalSeedStream(item, season, episode);
+        local.url = `${baseUrl}/local/resolve/${local._payload}`;
+        delete local._payload;
+        streams.push(local);
+      }
+      continue; // never sent to RD — see file header
+    }
     if (!config.REALDEBRID_TOKEN) continue;
-    if (item.torrent.hasPasskey) continue; // see file header
     rdEligible++;
     streams.push(toDebridStream(item, baseUrl, rdHashes.has(item.torrent.infoHash.toLowerCase())));
   }
@@ -384,4 +428,17 @@ async function resolveDebridLink(payloadB64) {
   return { url };
 }
 
-module.exports = { getStreams, resolveDebridLink, parseStreamId };
+/**
+ * Resolve a local-seed stream at play time — thin adapter between Express's
+ * (req, res) and lib/localseed.js's streamRelease(), which owns the whole
+ * response lifecycle (it may serve from the mount, an in-progress torrent
+ * download, or reject with 503 under admission control). season/episode
+ * come from the payload itself (encoded in toLocalSeedStream()), not from
+ * the request — Stremio's play request carries no such query param.
+ */
+async function resolveLocalSeed(req, res, payloadB64) {
+  const { infoHash, trackers, title, season, episode } = localseed.decodePayload(payloadB64);
+  await localseed.streamRelease(req, res, { infoHash, trackers, title }, season, episode);
+}
+
+module.exports = { getStreams, resolveDebridLink, resolveLocalSeed, parseStreamId };
