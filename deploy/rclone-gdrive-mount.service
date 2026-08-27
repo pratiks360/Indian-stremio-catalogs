@@ -1,0 +1,19 @@
+[Unit]
+Description=rclone mount of Google Drive for the local-seed feature
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=ubuntu
+ExecStart=/usr/bin/rclone mount gdrive: /mnt/gdrive \
+  --config /home/ubuntu/.config/rclone/rclone.conf \
+  --vfs-cache-mode minimal \
+  --allow-other \
+  --dir-cache-time 1h
+ExecStop=/bin/fusermount -u /mnt/gdrive
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
