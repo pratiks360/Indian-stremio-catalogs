@@ -61,6 +61,17 @@ function fmtSize(bytes) {
   return gb >= 1 ? `${gb.toFixed(2)} GB` : `${Math.round(bytes / 1048576)} MB`;
 }
 
+// Prowlarr surfaces the tracker's own ratio-bonus flags on each release via
+// indexerFlags (verified live against TorrentLeech/SpeedApp.io/SeedCore/
+// SceneTime). Display only — freeleech does NOT remove the passkey from the
+// announce URL, so it has no bearing on the RD-eligibility gate.
+function leechBadge(release) {
+  const flags = release.indexerFlags || [];
+  if (flags.includes('freeleech')) return '🆓 FREELEECH';
+  if (flags.includes('halfleech')) return '🆓 HALFLEECH';
+  return '';
+}
+
 /** Pull quality/format markers out of a scene release name for the UI line. */
 function qualityTags(name) {
   const tags = [];
@@ -145,7 +156,8 @@ function toDirectStream({ release, torrent }, season, episode) {
     tags.join(' '),
     fmtSize(torrent.totalBytes),
     `${release.seeders != null ? release.seeders : '?'} seeds`,
-    release.indexer
+    release.indexer,
+    leechBadge(release)
   ].filter(Boolean).join(' · ');
 
   return {
@@ -169,7 +181,8 @@ function toDebridStream({ release, torrent }, baseUrl, cachedHint) {
     tags.join(' '),
     fmtSize(torrent.totalBytes),
     `${release.seeders != null ? release.seeders : '?'} seeds`,
-    release.indexer
+    release.indexer,
+    leechBadge(release)
   ].filter(Boolean).join(' · ');
 
   const payload = Buffer.from(JSON.stringify({
@@ -198,7 +211,8 @@ function toLocalSeedStream({ release, torrent }, season, episode) {
     tags.join(' '),
     fmtSize(torrent.totalBytes),
     `${release.seeders != null ? release.seeders : '?'} seeds`,
-    release.indexer
+    release.indexer,
+    leechBadge(release)
   ].filter(Boolean).join(' · ');
 
   // season/episode ride along in the payload — pickFileIdx needs them to
@@ -216,7 +230,12 @@ function toLocalSeedStream({ release, torrent }, season, episode) {
     guid: release.guid,
     downloadUrl: release.downloadUrl,
     season,
-    episode
+    episode,
+    // Tracker-reported seeder count at search time — not live, but the only
+    // seeder number that exists (WebTorrent's own numPeers is live but is
+    // connected peers, not a tracker seed count). Carried through so the
+    // /activity "currently downloading" view can show it.
+    seeders: release.seeders != null ? release.seeders : null
   });
 
   return {
@@ -451,8 +470,12 @@ async function resolveDebridLink(payloadB64) {
  * the request — Stremio's play request carries no such query param.
  */
 async function resolveLocalSeed(req, res, payloadB64) {
-  const { infoHash, trackers, title, guid, downloadUrl, season, episode } = localseed.decodePayload(payloadB64);
-  await localseed.streamRelease(req, res, { infoHash, trackers, title, guid, downloadUrl }, season, episode);
+  const { infoHash, trackers, title, guid, downloadUrl, season, episode, seeders } = localseed.decodePayload(payloadB64);
+  // Same click signal as the RD path (stream.js:389) — this handler only
+  // runs when Stremio hits the Local play URL, i.e. the user actually
+  // pressed play on a Local stream.
+  activityLog.userClick({ releaseTitle: title, infoHash, deliveryPath: 'local' });
+  await localseed.streamRelease(req, res, { infoHash, trackers, title, guid, downloadUrl, seeders }, season, episode);
 }
 
 module.exports = { getStreams, resolveDebridLink, resolveLocalSeed, parseStreamId };

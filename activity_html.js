@@ -105,7 +105,80 @@ function computeSummary(buckets) {
   ];
 }
 
-function renderActivityPage(buckets) {
+function fmtBytes(n) {
+  if (!n) return '0 MB';
+  const gb = n / 1073741824;
+  return gb >= 1 ? `${gb.toFixed(2)} GB` : `${Math.round(n / 1048576)} MB`;
+}
+
+function fmtSpeed(bps) {
+  if (!bps) return '0 KB/s';
+  const mb = bps / 1048576;
+  return mb >= 1 ? `${mb.toFixed(1)} MB/s` : `${Math.round(bps / 1024)} KB/s`;
+}
+
+function fmtAgo(ms) {
+  if (!ms) return '—';
+  const mins = Math.round((Date.now() - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
+/** Builds the "Downloading Now" panel from lib/localseed.js's listActive(). */
+function renderDownloadingPanel(active, isActiveTab) {
+  const cols = ['Title', 'Progress', 'Downloaded', 'Speed', 'Peers', 'Seeders (at search)'];
+  const thead = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+  const tbody = active.length
+    ? active.map(t => `<tr>
+        <td>${esc(t.title)}</td>
+        <td>${t.progressPct}%</td>
+        <td>${fmtBytes(t.downloadedBytes)} / ${fmtBytes(t.totalBytes)}</td>
+        <td>${fmtSpeed(t.downloadSpeedBps)}</td>
+        <td>${esc(t.peers)}</td>
+        <td>${t.seeders != null ? esc(t.seeders) : '?'}</td>
+      </tr>`).join('')
+    : `<tr><td class="none" colspan="${cols.length}">Nothing downloading right now</td></tr>`;
+
+  return `
+    <section class="panel" id="panel-downloading" ${isActiveTab ? '' : 'hidden'}>
+      <p class="count">${active.length} torrent${active.length === 1 ? '' : 's'} active</p>
+      <div class="tablewrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>
+    </section>`;
+}
+
+/** Builds the "On Drive" panel from lib/localseed.js's listMounted(). */
+function renderMountedPanel(mounted, isActiveTab) {
+  const cols = ['File', 'Release', 'Size', 'Last Played'];
+  const thead = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+  const totalBytes = mounted.reduce((a, m) => a + (m.sizeBytes || 0), 0);
+  const tbody = mounted.length
+    ? mounted.map(m => `<tr>
+        <td>${esc(m.file)}</td>
+        <td>${esc(m.releaseTitle || '—')}</td>
+        <td>${fmtBytes(m.sizeBytes)}</td>
+        <td>${fmtAgo(m.lastPlayed)}</td>
+      </tr>`).join('')
+    : `<tr><td class="none" colspan="${cols.length}">Nothing on the Drive mount yet</td></tr>`;
+
+  return `
+    <section class="panel" id="panel-mounted" ${isActiveTab ? '' : 'hidden'}>
+      <p class="count">${mounted.length} file${mounted.length === 1 ? '' : 's'} · ${fmtBytes(totalBytes)} total</p>
+      <div class="tablewrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>
+    </section>`;
+}
+
+/**
+ * @param {object} buckets activityLog.readAll()'s per-type event buckets
+ * @param {{enabled:boolean, active:Array, mounted:Array}} [localseedInfo]
+ *   Live local-seed state (not log events) — omitted/disabled when the
+ *   Drive mount isn't configured on this box.
+ */
+function renderActivityPage(buckets, localseedInfo) {
+  const ls = localseedInfo && localseedInfo.enabled ? localseedInfo : null;
+
   const panels = TABS.map((tab, i) => {
     const rows = buckets[tab.key] || [];
     const thead = `<tr>${tab.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
@@ -120,11 +193,14 @@ function renderActivityPage(buckets) {
           <table><thead>${thead}</thead><tbody>${tbody}</tbody></table>
         </div>
       </section>`;
-  }).join('');
+  }).join('')
+    + (ls ? renderDownloadingPanel(ls.active, false) + renderMountedPanel(ls.mounted, false) : '');
 
   const tabButtons = TABS.map((tab, i) =>
     `<button class="tabbtn${i === 0 ? ' active' : ''}" data-target="panel-${tab.key}">${esc(tab.label)}</button>`
-  ).join('');
+  ).join('')
+    + (ls ? `<button class="tabbtn" data-target="panel-downloading">Downloading Now</button>
+             <button class="tabbtn" data-target="panel-mounted">On Drive</button>` : '');
 
   const summaryCards = computeSummary(buckets).map(s =>
     `<div class="card"><div class="card-value">${s.value}</div><div class="card-label">${esc(s.label)}</div></div>`
@@ -156,11 +232,24 @@ function renderActivityPage(buckets) {
   .card { background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.15); border-radius: 8px; padding: 0.7rem 1rem; min-width: 110px; }
   .card-value { font-size: 1.3rem; font-weight: 700; }
   .card-label { color: #888; font-size: 0.75rem; margin-top: 0.15rem; }
+  .toprow { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 0.5rem; }
+  .refreshbtn { background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.25); border-radius: 6px; padding: 0.5rem 0.9rem; font-size: 0.85rem; cursor: pointer; color: inherit; }
+  .refreshbtn:hover { background: rgba(128,128,128,0.2); }
+  .refreshbtn:disabled { opacity: 0.5; cursor: default; }
+  .refreshstatus { font-size: 0.8rem; color: #888; margin-top: 0.35rem; }
 </style>
 </head>
 <body>
-  <h1>India OTT Charts — Activity Log</h1>
-  <p class="sub">Latest 100 events per tab, newest first. 7-day retention.</p>
+  <div class="toprow">
+    <div>
+      <h1>India OTT Charts — Activity Log</h1>
+      <p class="sub">Latest 100 events per tab, newest first. 7-day retention.</p>
+    </div>
+    <div>
+      <button class="refreshbtn" id="refreshBtn">↻ Refresh catalogs now</button>
+      <p class="refreshstatus" id="refreshStatus"></p>
+    </div>
+  </div>
   <div class="summary">${summaryCards}</div>
   <div class="tabs">${tabButtons}</div>
   ${panels}
@@ -172,6 +261,24 @@ function renderActivityPage(buckets) {
         btn.classList.add('active');
         document.getElementById(btn.dataset.target).hidden = false;
       });
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('refreshBtn');
+      const status = document.getElementById('refreshStatus');
+      btn.disabled = true;
+      status.textContent = 'Refreshing…';
+      try {
+        const res = await fetch('/admin/refresh-catalogs', { method: 'POST' });
+        const body = await res.json();
+        status.textContent = res.ok
+          ? 'Done — reload the page to see updated catalogs.'
+          : 'Failed: ' + (body.error || res.status);
+      } catch (err) {
+        status.textContent = 'Failed: ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
     });
   </script>
 </body>

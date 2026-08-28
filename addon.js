@@ -132,7 +132,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.2.3';
+const ADDON_VERSION = '0.2.4';
 
 const manifest = {
   id: ADDON_ID,
@@ -281,8 +281,30 @@ async function main() {
   });
 
   app.get('/activity', (_, res) => {
+    const localseedInfo = localseed.isEnabled()
+      ? { enabled: true, active: localseed.listActive(), mounted: localseed.listMounted() }
+      : { enabled: false };
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderActivityPage(activityLog.readAll()));
+    res.send(renderActivityPage(activityLog.readAll(), localseedInfo));
+  });
+
+  // Manual catalog refresh from the /activity page's button. No auth on this
+  // box (same as every other route here) — rate-limited to one run at a
+  // time so repeated clicks can't pile up concurrent TMDB/scraper passes.
+  let refreshInFlight = false;
+  app.post('/admin/refresh-catalogs', async (_, res) => {
+    if (refreshInFlight) {
+      return res.status(429).json({ error: 'a refresh is already running' });
+    }
+    refreshInFlight = true;
+    try {
+      await refreshAll();
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    } finally {
+      refreshInFlight = false;
+    }
   });
 
   // Real-Debrid links can only be resolved at play time: the torrent may
