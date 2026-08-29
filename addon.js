@@ -132,7 +132,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.2.4';
+const ADDON_VERSION = '0.2.5';
 
 const manifest = {
   id: ADDON_ID,
@@ -282,7 +282,7 @@ async function main() {
 
   app.get('/activity', (_, res) => {
     const localseedInfo = localseed.isEnabled()
-      ? { enabled: true, active: localseed.listActive(), mounted: localseed.listMounted() }
+      ? { enabled: true, active: localseed.listActive(), mounted: localseed.listMounted(), capBytes: config.LOCALSEED.DRIVE_CAP_BYTES }
       : { enabled: false };
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(renderActivityPage(activityLog.readAll(), localseedInfo));

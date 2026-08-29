@@ -149,8 +149,8 @@ function renderDownloadingPanel(active, isActiveTab) {
     </section>`;
 }
 
-/** Builds the "On Drive" panel from lib/localseed.js's listMounted(). */
-function renderMountedPanel(mounted, isActiveTab) {
+/** Builds the "On Google Drive" panel from lib/localseed.js's listMounted(). */
+function renderMountedPanel(mounted, capBytes, isActiveTab) {
   const cols = ['File', 'Release', 'Size', 'Last Played'];
   const thead = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
   const totalBytes = mounted.reduce((a, m) => a + (m.sizeBytes || 0), 0);
@@ -163,9 +163,13 @@ function renderMountedPanel(mounted, isActiveTab) {
       </tr>`).join('')
     : `<tr><td class="none" colspan="${cols.length}">Nothing on the Drive mount yet</td></tr>`;
 
+  const usage = capBytes
+    ? ` · ${fmtBytes(totalBytes)} / ${fmtBytes(capBytes)} cap (${Math.round(totalBytes / capBytes * 100)}%)`
+    : ` · ${fmtBytes(totalBytes)} total`;
+
   return `
     <section class="panel" id="panel-mounted" ${isActiveTab ? '' : 'hidden'}>
-      <p class="count">${mounted.length} file${mounted.length === 1 ? '' : 's'} · ${fmtBytes(totalBytes)} total</p>
+      <p class="count">${mounted.length} file${mounted.length === 1 ? '' : 's'}${usage}</p>
       <div class="tablewrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>
     </section>`;
 }
@@ -194,13 +198,13 @@ function renderActivityPage(buckets, localseedInfo) {
         </div>
       </section>`;
   }).join('')
-    + (ls ? renderDownloadingPanel(ls.active, false) + renderMountedPanel(ls.mounted, false) : '');
+    + (ls ? renderDownloadingPanel(ls.active, false) + renderMountedPanel(ls.mounted, ls.capBytes, false) : '');
 
   const tabButtons = TABS.map((tab, i) =>
     `<button class="tabbtn${i === 0 ? ' active' : ''}" data-target="panel-${tab.key}">${esc(tab.label)}</button>`
   ).join('')
     + (ls ? `<button class="tabbtn" data-target="panel-downloading">Downloading Now</button>
-             <button class="tabbtn" data-target="panel-mounted">On Drive</button>` : '');
+             <button class="tabbtn" data-target="panel-mounted">On Google Drive</button>` : '');
 
   const summaryCards = computeSummary(buckets).map(s =>
     `<div class="card"><div class="card-value">${s.value}</div><div class="card-label">${esc(s.label)}</div></div>`
