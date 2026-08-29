@@ -127,49 +127,46 @@ function fmtAgo(ms) {
   return `${Math.round(hrs / 24)}d ago`;
 }
 
-/** Builds the "Downloading Now" panel from lib/localseed.js's listActive(). */
-function renderDownloadingPanel(active, isActiveTab) {
-  const cols = ['Title', 'Progress', 'Downloaded', 'Speed', 'Peers', 'Seeders (at search)'];
+/**
+ * Builds the unified "Files" panel: still-downloading VPS torrents
+ * (listActive()) and finished files on the Drive mount (listMounted()) in
+ * one table, a Location column telling them apart, and a checkbox + bulk
+ * delete button that hits POST /admin/delete-file for each selected row.
+ */
+function renderFilesPanel(active, mounted, capBytes, isActiveTab) {
+  const cols = ['', 'File', 'Location', 'Size', 'Status'];
   const thead = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-  const tbody = active.length
-    ? active.map(t => `<tr>
-        <td>${esc(t.title)}</td>
-        <td>${t.progressPct}%</td>
-        <td>${fmtBytes(t.downloadedBytes)} / ${fmtBytes(t.totalBytes)}</td>
-        <td>${fmtSpeed(t.downloadSpeedBps)}</td>
-        <td>${esc(t.peers)}</td>
-        <td>${t.seeders != null ? esc(t.seeders) : '?'}</td>
-      </tr>`).join('')
-    : `<tr><td class="none" colspan="${cols.length}">Nothing downloading right now</td></tr>`;
 
-  return `
-    <section class="panel" id="panel-downloading" ${isActiveTab ? '' : 'hidden'}>
-      <p class="count">${active.length} torrent${active.length === 1 ? '' : 's'} active</p>
-      <div class="tablewrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>
-    </section>`;
-}
+  const activeRows = active.map(t => `<tr>
+      <td><input type="checkbox" class="filerow" data-location="vps" data-id="${esc(t.infoHash)}"></td>
+      <td>${esc(t.title)}</td>
+      <td><span class="loc loc-vps">VPS</span></td>
+      <td>${fmtBytes(t.downloadedBytes)} / ${fmtBytes(t.totalBytes)}</td>
+      <td>${t.progressPct}% · ${fmtSpeed(t.downloadSpeedBps)} · ${esc(t.peers)}p</td>
+    </tr>`);
 
-/** Builds the "On Google Drive" panel from lib/localseed.js's listMounted(). */
-function renderMountedPanel(mounted, capBytes, isActiveTab) {
-  const cols = ['File', 'Release', 'Size', 'Last Played'];
-  const thead = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+  const mountedRows = mounted.map(m => `<tr>
+      <td><input type="checkbox" class="filerow" data-location="gdrive" data-id="${esc(m.file)}"></td>
+      <td>${esc(m.releaseTitle || m.file)}</td>
+      <td><span class="loc loc-gdrive">GDrive</span></td>
+      <td>${fmtBytes(m.sizeBytes)}</td>
+      <td>played ${fmtAgo(m.lastPlayed)}</td>
+    </tr>`);
+
+  const rows = [...activeRows, ...mountedRows];
+  const tbody = rows.length
+    ? rows.join('')
+    : `<tr><td class="none" colspan="${cols.length}">No files downloading or on the Drive mount</td></tr>`;
+
   const totalBytes = mounted.reduce((a, m) => a + (m.sizeBytes || 0), 0);
-  const tbody = mounted.length
-    ? mounted.map(m => `<tr>
-        <td>${esc(m.file)}</td>
-        <td>${esc(m.releaseTitle || '—')}</td>
-        <td>${fmtBytes(m.sizeBytes)}</td>
-        <td>${fmtAgo(m.lastPlayed)}</td>
-      </tr>`).join('')
-    : `<tr><td class="none" colspan="${cols.length}">Nothing on the Drive mount yet</td></tr>`;
-
   const usage = capBytes
-    ? ` · ${fmtBytes(totalBytes)} / ${fmtBytes(capBytes)} cap (${Math.round(totalBytes / capBytes * 100)}%)`
-    : ` · ${fmtBytes(totalBytes)} total`;
+    ? ` · ${fmtBytes(totalBytes)} / ${fmtBytes(capBytes)} cap on Drive (${Math.round(totalBytes / capBytes * 100)}%)`
+    : ` · ${fmtBytes(totalBytes)} on Drive`;
 
   return `
-    <section class="panel" id="panel-mounted" ${isActiveTab ? '' : 'hidden'}>
-      <p class="count">${mounted.length} file${mounted.length === 1 ? '' : 's'}${usage}</p>
+    <section class="panel" id="panel-files" ${isActiveTab ? '' : 'hidden'}>
+      <p class="count">${active.length} downloading (VPS) · ${mounted.length} on Drive${usage}</p>
+      <button class="refreshbtn" id="filesDeleteBtn" disabled>Delete selected</button>
       <div class="tablewrap"><table><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>
     </section>`;
 }
@@ -198,13 +195,12 @@ function renderActivityPage(buckets, localseedInfo) {
         </div>
       </section>`;
   }).join('')
-    + (ls ? renderDownloadingPanel(ls.active, false) + renderMountedPanel(ls.mounted, ls.capBytes, false) : '');
+    + (ls ? renderFilesPanel(ls.active, ls.mounted, ls.capBytes, false) : '');
 
   const tabButtons = TABS.map((tab, i) =>
     `<button class="tabbtn${i === 0 ? ' active' : ''}" data-target="panel-${tab.key}">${esc(tab.label)}</button>`
   ).join('')
-    + (ls ? `<button class="tabbtn" data-target="panel-downloading">Downloading Now</button>
-             <button class="tabbtn" data-target="panel-mounted">On Google Drive</button>` : '');
+    + (ls ? `<button class="tabbtn" data-target="panel-files">Files</button>` : '');
 
   const summaryCards = computeSummary(buckets).map(s =>
     `<div class="card"><div class="card-value">${s.value}</div><div class="card-label">${esc(s.label)}</div></div>`
@@ -241,6 +237,10 @@ function renderActivityPage(buckets, localseedInfo) {
   .refreshbtn:hover { background: rgba(128,128,128,0.2); }
   .refreshbtn:disabled { opacity: 0.5; cursor: default; }
   .refreshstatus { font-size: 0.8rem; color: #888; margin-top: 0.35rem; }
+  #filesDeleteBtn { margin-bottom: 0.6rem; }
+  .loc { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
+  .loc-vps { background: rgba(52,152,219,0.18); color: #3498db; }
+  .loc-gdrive { background: rgba(46,158,68,0.18); color: #2e9e44; }
 </style>
 </head>
 <body>
@@ -284,6 +284,29 @@ function renderActivityPage(buckets, localseedInfo) {
         btn.disabled = false;
       }
     });
+
+    const filesDeleteBtn = document.getElementById('filesDeleteBtn');
+    if (filesDeleteBtn) {
+      document.querySelectorAll('.filerow').forEach(cb => {
+        cb.addEventListener('change', () => {
+          filesDeleteBtn.disabled = !document.querySelector('.filerow:checked');
+        });
+      });
+      filesDeleteBtn.addEventListener('click', async () => {
+        const checked = [...document.querySelectorAll('.filerow:checked')];
+        if (!checked.length) return;
+        if (!confirm(\`Delete \${checked.length} file(s)? This cannot be undone.\`)) return;
+        filesDeleteBtn.disabled = true;
+        filesDeleteBtn.textContent = 'Deleting…';
+        for (const cb of checked) {
+          const loc = cb.dataset.location, id = cb.dataset.id;
+          try {
+            await fetch(\`/admin/delete-file?location=\${encodeURIComponent(loc)}&id=\${encodeURIComponent(id)}\`, { method: 'POST' });
+          } catch { /* best-effort — reload shows whatever actually happened */ }
+        }
+        window.location.reload();
+      });
+    }
   </script>
 </body>
 </html>`;

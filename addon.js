@@ -132,7 +132,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.2.8';
+const ADDON_VERSION = '0.2.9';
 
 const manifest = {
   id: ADDON_ID,
@@ -304,6 +304,30 @@ async function main() {
       res.status(500).json({ error: err.message });
     } finally {
       refreshInFlight = false;
+    }
+  });
+
+  // Delete one local-seed file from the /activity "Files" tab. location is
+  // 'vps' (still-downloading torrent — cancelled + wiped) or 'gdrive'
+  // (mounted file — unlinked through the rclone mount, which deletes the
+  // real Drive file). Query string, not a JSON body — no body parser is
+  // wired up elsewhere in this addon and this needs nothing more.
+  app.post('/admin/delete-file', async (req, res) => {
+    const { location, id } = req.query;
+    if (!localseed.isEnabled()) return res.status(404).json({ error: 'local-seed not enabled' });
+    if (location !== 'vps' && location !== 'gdrive') {
+      return res.status(400).json({ error: 'location must be "vps" or "gdrive"' });
+    }
+    if (!id) return res.status(400).json({ error: 'id required' });
+    try {
+      const found = location === 'vps'
+        ? await localseed.deleteActive(id)
+        : localseed.deleteMounted(id);
+      activityLog.localSeed({ infoHash: location === 'vps' ? id : undefined, releaseTitle: id, phase: `delete-${location}`, success: true });
+      res.json({ ok: true, found });
+    } catch (err) {
+      activityLog.localSeed({ releaseTitle: id, phase: `delete-${location}`, success: false, errorMsg: err.message });
+      res.status(500).json({ error: err.message });
     }
   });
 
