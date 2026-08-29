@@ -19,7 +19,12 @@ const path = require('path');
 
 const config = {
   TMDB_API_KEY: process.env.TMDB_API_KEY || '',
-  TMDB_BASE: 'https://api.themoviedb.org/3',
+  // Amazon CloudFront (fronts TMDB) resets ~60-80% of TLS handshakes from
+  // this app's VPS IP (confirmed live, see docs/superpowers/specs — Oracle
+  // Cloud ASN reputation issue, not fixable here). TMDB_PROXY_URL points at
+  // a small Cloudflare Worker reverse-proxy instead (deploy/tmdb-proxy-worker.js)
+  // when set; falls back to hitting TMDB directly when blank.
+  TMDB_BASE: process.env.TMDB_PROXY_URL || 'https://api.themoviedb.org/3',
   TMDB_IMAGE_BASE: 'https://image.tmdb.org/t/p/w500',
 
   // Everything India. We are geo-outside India, so force region on every call.
@@ -69,6 +74,13 @@ const config = {
   // died with 429 the moment that specific model got busy; the router routes
   // around exactly that.
   OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'openrouter/free',
+
+  // Optional last-resort AI fallback — see lib/cloudflare-ai.js. Used only
+  // when every OpenRouter draw in search.js's runSearch fails/times out.
+  // Both blank = fallback silently skipped, OpenRouter's own error surfaces.
+  CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID || '',
+  CLOUDFLARE_AI_TOKEN: process.env.CLOUDFLARE_AI_TOKEN || '',
+  CLOUDFLARE_AI_MODEL: process.env.CLOUDFLARE_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct',
 
   // --- Prowlarr / Real-Debrid (stream resource) -------------------------
   // Prowlarr runs on this same VPS; talk to it over loopback so the

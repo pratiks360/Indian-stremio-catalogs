@@ -22,6 +22,7 @@ const config = require('./config');
 const cache = require('./cache');
 const tmdb = require('./tmdb');
 const openrouter = require('./lib/openrouter');
+const cloudflareAi = require('./lib/cloudflare-ai');
 const { PLATFORMS } = require('./catalog');
 
 const NUM_RESULTS = 20;
@@ -120,10 +121,33 @@ async function runSearch(query) {
   let items = [];
   let lastRaw = '';
   for (let draw = 1; draw <= MAX_DRAWS && !items.length; draw++) {
-    lastRaw = await openrouter.generateText(prompt);
-    items = parseResponse(lastRaw);
-    if (!items.length && draw < MAX_DRAWS) {
-      console.warn(`[search] draw ${draw} unparseable for "${query}", retrying with a fresh model draw`);
+    try {
+      lastRaw = await openrouter.generateText(prompt);
+      items = parseResponse(lastRaw);
+      if (!items.length && draw < MAX_DRAWS) {
+        console.warn(`[search] draw ${draw} unparseable for "${query}", retrying with a fresh model draw`);
+      }
+    } catch (err) {
+      // A hard throw here already means openrouter.generateText's own 3
+      // internal attempts (30s timeout each) all failed — another draw
+      // would just pay that cost again for the same likely outcome. Stop
+      // drawing and fall through to the Cloudflare fallback below instead.
+      console.warn(`[search] draw ${draw} failed for "${query}": ${err.message}`);
+      break;
+    }
+  }
+
+  // Last resort: every OpenRouter draw failed or came back unparseable.
+  // Cloudflare Workers AI is a different provider entirely (see
+  // lib/cloudflare-ai.js), so an OpenRouter-side outage/congestion doesn't
+  // take this down too. Silently skipped if not configured.
+  if (!items.length && cloudflareAi.isConfigured()) {
+    try {
+      console.warn(`[search] all ${MAX_DRAWS} OpenRouter draws failed for "${query}", trying Cloudflare AI`);
+      lastRaw = await cloudflareAi.generateText(prompt);
+      items = parseResponse(lastRaw);
+    } catch (err) {
+      console.warn(`[search] Cloudflare AI fallback failed for "${query}": ${err.message}`);
     }
   }
 
