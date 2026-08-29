@@ -130,11 +130,13 @@ const config = {
     MIN_FREE_BYTES: 5 * 1024 * 1024 * 1024,
     SEED_WINDOW_MS: 24 * 60 * 60 * 1000,
     DRIVE_CAP_BYTES: 12 * 1024 * 1024 * 1024,
-    // Optional. When set, a mounted file streams directly from Google
-    // Drive's API (Range-request capable, skips Drive's large-file virus-
-    // scan warning page that a plain share link would hit) instead of
-    // being proxied through this VPS. Falls back to the VPS proxy when
-    // unset — see lib/localseed.js's streamRelease().
+    // Optional enable-flag for direct-from-Drive streaming of mounted
+    // files (see lib/localseed.js's driveMediaUrl()) instead of proxying
+    // through this VPS. Named GDRIVE_API_KEY for historical reasons — a
+    // real Drive API key was the original plan, but Google blocks
+    // bare-API-key media fetches as of 2026 (confirmed live), so this now
+    // just needs to be non-empty; its actual value is unused. Falls back
+    // to the VPS proxy when unset.
     GDRIVE_API_KEY: process.env.GDRIVE_API_KEY || ''
   },
 
