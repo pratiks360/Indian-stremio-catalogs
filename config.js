@@ -129,7 +129,13 @@ const config = {
     RSS_CEILING_BYTES: 300 * 1024 * 1024,
     MIN_FREE_BYTES: 5 * 1024 * 1024 * 1024,
     SEED_WINDOW_MS: 24 * 60 * 60 * 1000,
-    DRIVE_CAP_BYTES: 12 * 1024 * 1024 * 1024
+    DRIVE_CAP_BYTES: 12 * 1024 * 1024 * 1024,
+    // Optional. When set, a mounted file streams directly from Google
+    // Drive's API (Range-request capable, skips Drive's large-file virus-
+    // scan warning page that a plain share link would hit) instead of
+    // being proxied through this VPS. Falls back to the VPS proxy when
+    // unset — see lib/localseed.js's streamRelease().
+    GDRIVE_API_KEY: process.env.GDRIVE_API_KEY || ''
   },
 
   // TMDB is a HYDRATION source only: name -> imdb_id, poster, language.
