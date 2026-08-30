@@ -132,7 +132,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.3.0';
+const ADDON_VERSION = '0.3.1';
 
 const manifest = {
   id: ADDON_ID,
