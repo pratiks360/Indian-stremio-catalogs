@@ -187,8 +187,8 @@ function renderFriendRecsSection(items) {
   return `
     <section class="friendrecs">
       <h2>Friend Recommendations</h2>
-      <p class="sub">One title or IMDb id (tt1234567) per line. Feeds the "Friend Recommendations" catalog.</p>
-      <textarea id="friendRecsInput" rows="4" placeholder="Sacred Games&#10;tt1234567&#10;Jawan (2023)"></textarea>
+      <p class="sub">One title, IMDb id (tt1234567), or IMDb URL per line. Feeds the "Friend Recommendations" catalog.</p>
+      <textarea id="friendRecsInput" rows="4" placeholder="Sacred Games&#10;tt1234567&#10;https://www.imdb.com/title/tt7366338/"></textarea>
       <div>
         <button class="refreshbtn" id="friendRecsSubmit">Add to catalog</button>
         <span class="refreshstatus" id="friendRecsStatus"></span>
