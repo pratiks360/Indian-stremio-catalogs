@@ -14,6 +14,8 @@ const activityLog = require('./activity-log');
 const { renderActivityPage } = require('./activity_html');
 const localseed = require('./lib/localseed');
 const localseedCatalog = require('./lib/localseed_catalog');
+const friendRecs = require('./lib/friend_recs');
+const friendCatalog = require('./friend_catalog');
 
 const ADDON_ID = 'community.india.ott.catalogs';
 
@@ -125,6 +127,18 @@ if (localseed.isEnabled()) {
   console.warn('[manifest] VPS/Drive Downloaded catalog not advertised — no Google Drive mount configured');
 }
 
+// Manually curated list — titles/IMDb ids pasted into /activity's textarea
+// (POST /admin/friend-recs). Always advertised: TMDB_API_KEY is already a
+// hard requirement for the rest of this addon, nothing extra to gate on.
+for (const type of ['movie', 'series']) {
+  catalogs.push({
+    type,
+    id: 'iott-friend',
+    name: 'Friend Recommendations',
+    extra: [{ name: 'skip', isRequired: false }]
+  });
+}
+
 // Streams come from Prowlarr. Without it this stays a catalog-only addon,
 // exactly as before, and playback is left to whatever else is installed.
 const STREAMING = Boolean(config.PROWLARR_API_KEY);
@@ -132,7 +146,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.3.1';
+const ADDON_VERSION = '0.3.2';
 
 const manifest = {
   id: ADDON_ID,
@@ -200,6 +214,17 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
       return { metas, cacheMaxAge: 300, staleRevalidate: 600, origin };
     } catch (err) {
       console.error(`[catalog] localseed failed: ${err.message}`);
+      return { metas: [] };
+    }
+  }
+
+  if (id === 'iott-friend') {
+    try {
+      const { metas, origin } = await friendCatalog.getCatalog(type);
+      console.log(`[catalog] friend-recs (${type}) -> ${metas.length} metas`);
+      return { metas, cacheMaxAge: 300, staleRevalidate: 600, origin };
+    } catch (err) {
+      console.error(`[catalog] friend-recs failed: ${err.message}`);
       return { metas: [] };
     }
   }
@@ -285,7 +310,7 @@ async function main() {
       ? { enabled: true, active: localseed.listActive(), mounted: localseed.listMounted(), capBytes: config.LOCALSEED.DRIVE_CAP_BYTES }
       : { enabled: false };
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(renderActivityPage(activityLog.readAll(), localseedInfo));
+    res.send(renderActivityPage(activityLog.readAll(), localseedInfo, friendRecs.list()));
   });
 
   // Manual catalog refresh from the /activity page's button. No auth on this
@@ -305,6 +330,26 @@ async function main() {
     } finally {
       refreshInFlight = false;
     }
+  });
+
+  // Titles/IMDb ids pasted into /activity's "Friend Recommendations"
+  // textarea — one per line. express.text() only on this route: no JSON
+  // body parser is wired up anywhere else in this addon, and this needs
+  // nothing more than the raw textarea contents.
+  app.post('/admin/friend-recs', express.text({ limit: '256kb' }), async (req, res) => {
+    try {
+      const result = await friendRecs.addLines(req.body);
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/admin/friend-recs/delete', (req, res) => {
+    const { imdb_id, type } = req.query;
+    if (!imdb_id || !type) return res.status(400).json({ error: 'imdb_id and type required' });
+    friendRecs.remove(imdb_id, type);
+    res.json({ ok: true });
   });
 
   // Delete one local-seed file from the /activity "Files" tab. location is

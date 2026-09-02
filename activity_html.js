@@ -171,13 +171,40 @@ function renderFilesPanel(active, mounted, capBytes, isActiveTab) {
     </section>`;
 }
 
+/** Builds the "Friend Recommendations" paste-box section, plus the current list. */
+function renderFriendRecsSection(items) {
+  const rows = items
+    .slice()
+    .sort((a, b) => b.addedAt - a.addedAt)
+    .map(it => `<li>
+        <input type="hidden" class="frid" value="${esc(it.imdb_id)}">
+        <input type="hidden" class="frtype" value="${esc(it.type)}">
+        ${esc(it.name)} <span class="count">(${esc(it.type)}${it.year ? `, ${esc(it.year)}` : ''})</span>
+        <button class="frdel" data-imdb="${esc(it.imdb_id)}" data-type="${esc(it.type)}" title="Remove">&times;</button>
+      </li>`)
+    .join('');
+
+  return `
+    <section class="friendrecs">
+      <h2>Friend Recommendations</h2>
+      <p class="sub">One title or IMDb id (tt1234567) per line. Feeds the "Friend Recommendations" catalog.</p>
+      <textarea id="friendRecsInput" rows="4" placeholder="Sacred Games&#10;tt1234567&#10;Jawan (2023)"></textarea>
+      <div>
+        <button class="refreshbtn" id="friendRecsSubmit">Add to catalog</button>
+        <span class="refreshstatus" id="friendRecsStatus"></span>
+      </div>
+      ${items.length ? `<ul class="frlist">${rows}</ul>` : '<p class="count">Nothing added yet</p>'}
+    </section>`;
+}
+
 /**
  * @param {object} buckets activityLog.readAll()'s per-type event buckets
  * @param {{enabled:boolean, active:Array, mounted:Array}} [localseedInfo]
  *   Live local-seed state (not log events) — omitted/disabled when the
  *   Drive mount isn't configured on this box.
+ * @param {Array} [friendRecsItems] lib/friend_recs.js's list() — omitted defaults to empty.
  */
-function renderActivityPage(buckets, localseedInfo) {
+function renderActivityPage(buckets, localseedInfo, friendRecsItems) {
   const ls = localseedInfo && localseedInfo.enabled ? localseedInfo : null;
 
   const panels = TABS.map((tab, i) => {
@@ -241,6 +268,12 @@ function renderActivityPage(buckets, localseedInfo) {
   .loc { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 4px; font-weight: 600; }
   .loc-vps { background: rgba(52,152,219,0.18); color: #3498db; }
   .loc-gdrive { background: rgba(46,158,68,0.18); color: #2e9e44; }
+  .friendrecs { border: 1px solid rgba(128,128,128,0.2); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+  .friendrecs h2 { font-size: 1.05rem; margin: 0 0 0.2rem; }
+  .friendrecs textarea { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 0.85rem; padding: 0.5rem; margin: 0.5rem 0; border-radius: 6px; border: 1px solid rgba(128,128,128,0.3); background: transparent; color: inherit; }
+  .frlist { list-style: none; padding: 0; margin: 0.75rem 0 0; font-size: 0.85rem; }
+  .frlist li { padding: 0.3rem 0; border-bottom: 1px solid rgba(128,128,128,0.1); display: flex; align-items: center; gap: 0.5rem; }
+  .frdel { margin-left: auto; background: none; border: none; color: #c0392b; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.3rem; }
 </style>
 </head>
 <body>
@@ -255,6 +288,7 @@ function renderActivityPage(buckets, localseedInfo) {
     </div>
   </div>
   <div class="summary">${summaryCards}</div>
+  ${renderFriendRecsSection(friendRecsItems || [])}
   <div class="tabs">${tabButtons}</div>
   ${panels}
   <script>
@@ -283,6 +317,43 @@ function renderActivityPage(buckets, localseedInfo) {
       } finally {
         btn.disabled = false;
       }
+    });
+
+    const frSubmit = document.getElementById('friendRecsSubmit');
+    if (frSubmit) {
+      frSubmit.addEventListener('click', async () => {
+        const input = document.getElementById('friendRecsInput');
+        const status = document.getElementById('friendRecsStatus');
+        const text = input.value.trim();
+        if (!text) return;
+        frSubmit.disabled = true;
+        status.textContent = 'Resolving…';
+        try {
+          const res = await fetch('/admin/friend-recs', {
+            method: 'POST',
+            headers: { 'content-type': 'text/plain' },
+            body: text
+          });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.error || res.status);
+          status.textContent = \`Added \${body.added.length}, skipped \${body.skipped.length}.\`;
+          if (body.added.length) { input.value = ''; window.location.reload(); }
+        } catch (err) {
+          status.textContent = 'Failed: ' + err.message;
+        } finally {
+          frSubmit.disabled = false;
+        }
+      });
+    }
+
+    document.querySelectorAll('.frdel').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await fetch(\`/admin/friend-recs/delete?imdb_id=\${encodeURIComponent(btn.dataset.imdb)}&type=\${encodeURIComponent(btn.dataset.type)}\`, { method: 'POST' });
+          window.location.reload();
+        } catch { btn.disabled = false; }
+      });
     });
 
     const filesDeleteBtn = document.getElementById('filesDeleteBtn');
