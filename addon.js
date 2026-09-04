@@ -146,7 +146,7 @@ if (!STREAMING) {
   console.warn('[manifest] stream resource not advertised — PROWLARR_API_KEY is not set');
 }
 
-const ADDON_VERSION = '0.3.3';
+const ADDON_VERSION = '0.3.4';
 
 const manifest = {
   id: ADDON_ID,
@@ -365,10 +365,19 @@ async function main() {
     }
     if (!id) return res.status(400).json({ error: 'id required' });
     try {
+      // Snapshot the torrent's seeding counters BEFORE deleteActive()
+      // destroys it — after removal the counters are unreadable.
+      const snap = location === 'vps' ? localseed.seedSnapshotFor(id) : null;
       const found = location === 'vps'
         ? await localseed.deleteActive(id)
         : localseed.deleteMounted(id);
-      activityLog.localSeed({ infoHash: location === 'vps' ? id : undefined, releaseTitle: id, phase: `delete-${location}`, success: true });
+      activityLog.localSeed({
+        infoHash: location === 'vps' ? id : undefined,
+        releaseTitle: id,
+        phase: `delete-${location}`,
+        success: true,
+        ...(snap ? { uploadedBytes: snap.uploadedBytes, downloadedBytes: snap.downloadedBytes, ratioPct: snap.ratioPct } : {})
+      });
       res.json({ ok: true, found });
     } catch (err) {
       activityLog.localSeed({ releaseTitle: id, phase: `delete-${location}`, success: false, errorMsg: err.message });

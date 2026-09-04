@@ -50,8 +50,11 @@ const TABS = [
   {
     key: 'local_seed',
     label: 'Local Seed',
-    cols: ['Time', 'Release', 'Phase', 'Success', 'Duration (ms)', 'Error'],
-    row: e => [esc(e.timestamp), esc(e.releaseTitle), esc(e.phase), ok(e.success), esc(e.duration_ms), esc(e.errorMsg)]
+    cols: ['Time', 'Release', 'Phase', 'Seeded', 'Success', 'Duration (ms)', 'Error'],
+    row: e => [
+      esc(e.timestamp), esc(e.releaseTitle), esc(e.phase), fmtSeeded(e),
+      ok(e.success), esc(e.duration_ms), esc(e.errorMsg)
+    ]
   }
 ];
 
@@ -109,6 +112,21 @@ function fmtBytes(n) {
   if (!n) return '0 MB';
   const gb = n / 1073741824;
   return gb >= 1 ? `${gb.toFixed(2)} GB` : `${Math.round(n / 1048576)} MB`;
+}
+
+/**
+ * "Seeded" cell for local_seed rows: MB uploaded to torrent peers + the
+ * share of verified downloaded bytes that was re-seeded (tracker-ratio
+ * sense), snapshot at event time by lib/localseed.js's seedSnapshot().
+ * '—' when the event carried no live torrent (mount serve after the seed
+ * window ended, etc.) or nothing had been downloaded yet (no ratio basis).
+ */
+function fmtSeeded(e) {
+  if (e.uploadedBytes == null && e.downloadedBytes == null) return '—';
+  const pct = e.downloadedBytes > 0
+    ? (e.ratioPct != null ? `${e.ratioPct}%` : `${Math.round((e.uploadedBytes / e.downloadedBytes) * 100)}%`)
+    : '—';
+  return `${pct} · ${fmtBytes(e.uploadedBytes)}`;
 }
 
 function fmtSpeed(bps) {

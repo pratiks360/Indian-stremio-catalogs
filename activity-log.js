@@ -52,8 +52,15 @@ function rdAction({ action, torrentHash, success, status, duration_ms }) {
   record('rd_action', { action, torrentHash, success, status, duration_ms });
 }
 
-function localSeed({ infoHash, releaseTitle, phase, success, errorMsg, duration_ms }) {
-  record('local_seed', { infoHash, releaseTitle, phase, success, errorMsg, duration_ms });
+function localSeed({ infoHash, releaseTitle, phase, success, errorMsg, duration_ms, uploadedBytes, downloadedBytes, ratioPct }) {
+  record('local_seed', {
+    infoHash, releaseTitle, phase, success, errorMsg, duration_ms,
+    // Peer-seeding snapshot (tracker-ratio sense) captured when the event
+    // fired — see lib/localseed.js's seedSnapshot(). Absent on events with
+    // no live torrent (mount serves after the seed window, evictions); the
+    // page then renders '—' rather than a fabricated zero.
+    uploadedBytes, downloadedBytes, ratioPct
+  });
 }
 
 /**
